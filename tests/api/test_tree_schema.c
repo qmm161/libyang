@@ -25,8 +25,10 @@
 #include <unistd.h>
 #include <string.h>
 
-#include "../config.h"
-#include "../../src/libyang.h"
+#include "tests/config.h"
+#include "libyang.h"
+
+#define TMP_TEMPLATE "/tmp/libyang-XXXXXX"
 
 struct ly_ctx *ctx = NULL;
 struct lyd_node *root = NULL;
@@ -38,6 +40,8 @@ const char *lys_module_a = \
         xmlns:a=\"urn:a\">                            \
   <namespace uri=\"urn:a\"/>                          \
   <prefix value=\"a_mod\"/>                           \
+  <include module=\"asub\"/>                          \
+  <include module=\"atop\"/>                          \
   <revision date=\"2015-01-01\">                      \
     <description>                                     \
       <text>version 1</text>                          \
@@ -46,8 +50,6 @@ const char *lys_module_a = \
       <text>RFC XXXX</text>                           \
     </reference>                                      \
   </revision>                                         \
-  <include module=\"asub\"/>                          \
-  <include module=\"atop\"/>                          \
   <feature name=\"foo\"/>                             \
   <grouping name=\"gg\">                              \
     <leaf name=\"bar-gggg\">                          \
@@ -72,7 +74,11 @@ const char *lys_module_a = \
   </container>                                        \
   <augment target-node=\"/x\">                        \
     <if-feature name=\"bar\"/>                        \
-    <container name=\"bar-y\"/>                       \
+    <container name=\"bar-y\">                        \
+      <leaf name=\"ll\">                              \
+        <type name=\"string\"/>                       \
+      </leaf>                                         \
+    </container>                                      \
   </augment>                                          \
   <rpc name=\"bar-rpc\">                              \
     <if-feature name=\"bar\"/>                        \
@@ -83,7 +89,7 @@ const char *lys_module_a = \
 </module>                                             \
 ";
 
-char lys_module_b[669] =
+char lys_module_b[] =
 "module b {\
     namespace \"urn:b\";\
     prefix b_mod;\
@@ -97,14 +103,14 @@ char lys_module_b[669] =
     }\
     container x {\
         leaf bar-leaf {\
-            if-feature bar;\
+            if-feature \"bar\";\
             type string;\
         }\
         uses gg {\
-            if-feature bar;\
+            if-feature \"bar\";\
         }\
         leaf baz {\
-            if-feature foo;\
+            if-feature \"foo\";\
             type string;\
         }\
         leaf bubba {\
@@ -112,14 +118,14 @@ char lys_module_b[669] =
         }\
     }\
     augment \"/x\" {\
-        if-feature bar;\
+        if-feature \"bar\";\
         container bar-y;\
     }\
     rpc bar-rpc {\
-        if-feature bar;\
+        if-feature \"bar\";\
     }\
     rpc foo-rpc {\
-        if-feature foo;\
+        if-feature \"foo\";\
     }\
 }";
 
@@ -156,7 +162,11 @@ const char *lys_module_a_with_typo = \
   </container>                                        \
   <augment target-node=\"/x\">                        \
     <if-feature name=\"bar\"/>                        \
-    <container name=\"bar-y\"/>                       \
+    <container name=\"bar-y\">                        \
+      <leaf name=\"ll\">                              \
+        <type name=\"string\"/>                       \
+      </leaf>                                         \
+    </container>                                      \
   </augment>                                          \
   <rpc name=\"bar-rpc\">                              \
     <if-feature name=\"bar\"/>                        \
@@ -169,15 +179,10 @@ const char *lys_module_a_with_typo = \
 
 char *result_tree = "\
 module: a\n\
-   +--rw top\n\
-   |  +--rw bar-sub\n\
-   |  +--rw bar-sub2\n\
-   +--rw x\n\
-      +--rw bubba?      string\n\
-      +--rw bar-y\n\
-notifications:\n\
-   +---n bar-notif\n\
-   +---n fox-notif\n";
+    +--rw top\n\
+    |  +--rw bar-sub2\n\
+    +--rw x\n\
+       +--rw bubba?      string\n";
 
 char *result_yang = "\
 module a {\n\
@@ -185,9 +190,10 @@ module a {\n\
   prefix a_mod;\n\
 \n\
   include \"asub\";\n\
+\n\
   include \"atop\";\n\
 \n\
-  revision \"2015-01-01\" {\n\
+  revision 2015-01-01 {\n\
     description\n\
       \"version 1\";\n\
     reference\n\
@@ -204,32 +210,36 @@ module a {\n\
 \n\
   container x {\n\
     leaf bar-leaf {\n\
-      if-feature bar;\n\
+      if-feature \"bar\";\n\
       type string;\n\
-    }\n\
+    }\n\n\
     uses gg {\n\
-      if-feature bar;\n\
-    }\n\
+      if-feature \"bar\";\n\
+    }\n\n\
     leaf baz {\n\
-      if-feature foo;\n\
+      if-feature \"foo\";\n\
       type string;\n\
-    }\n\
+    }\n\n\
     leaf bubba {\n\
       type string;\n\
     }\n\
   }\n\
 \n\
+  augment \"/x\" {\n\
+    if-feature \"bar\";\n\
+    container bar-y {\n\
+      leaf ll {\n\
+        type string;\n\
+      }\n\
+    }\n\
+  }\n\
+\n\
   rpc bar-rpc {\n\
-    if-feature bar;\n\
+    if-feature \"bar\";\n\
   }\n\
 \n\
   rpc foo-rpc {\n\
-    if-feature foo;\n\
-  }\n\
-\n\
-  augment \"/x\" {\n\
-    if-feature bar;\n\
-    container bar-y;\n\
+    if-feature \"foo\";\n\
   }\n\
 }\n";
 
@@ -272,17 +282,20 @@ char *result_yin = "\
       <type name=\"string\"/>\n\
     </leaf>\n\
   </container>\n\
+  <augment target-node=\"/x\">\n\
+    <if-feature name=\"bar\"/>\n\
+    <container name=\"bar-y\">\n\
+      <leaf name=\"ll\">\n\
+        <type name=\"string\"/>\n\
+      </leaf>\n\
+    </container>\n\
+  </augment>\n\
   <rpc name=\"bar-rpc\">\n\
     <if-feature name=\"bar\"/>\n\
   </rpc>\n\
   <rpc name=\"foo-rpc\">\n\
     <if-feature name=\"foo\"/>\n\
   </rpc>\n\
-  <augment target-node=\"/x\">\n\
-    <if-feature name=\"bar\"/>\n\
-    <container name=\"bar-y\">\n\
-    </container>\n\
-  </augment>\n\
 </module>\n";
 
 char *result_info ="\
@@ -300,7 +313,7 @@ setup_f(void **state)
     (void) state; /* unused */
     char *yang_folder = TESTS_DIR"/api/files";
 
-    ctx = ly_ctx_new(yang_folder);
+    ctx = ly_ctx_new(yang_folder, 0);
     if (!ctx) {
         return -1;
     }
@@ -331,7 +344,7 @@ test_lys_parse_mem(void **state)
 
     module = NULL;
     ctx = NULL;
-    ctx = ly_ctx_new(yang_folder);
+    ctx = ly_ctx_new(yang_folder, 0);
     module = lys_parse_mem(ctx, lys_module_a, yang_format);
     if (!module) {
         fail();
@@ -368,7 +381,7 @@ test_lys_parse_fd(void **state)
     char *yang_file = TESTS_DIR"/api/files/b.yang";
     int fd = -1;
 
-    ctx = ly_ctx_new(yang_folder);
+    ctx = ly_ctx_new(yang_folder, 0);
 
     fd = open(yin_file, O_RDONLY);
     if (fd == -1) {
@@ -427,7 +440,7 @@ test_lys_parse_path(void **state)
     }
     close(fd);
 
-    ctx = ly_ctx_new(yang_folder);
+    ctx = ly_ctx_new(yang_folder, 0);
     module = lys_parse_path(ctx, yin_file, LYS_IN_YIN);
     if (!module) {
         fail();
@@ -580,7 +593,7 @@ test_lys_is_disabled(void **state)
     (void) state; /* unused */
     LYS_INFORMAT yang_format = LYS_IN_YIN;
     const struct lys_module *module;
-    const struct lys_feature *feature = NULL;
+    const struct lys_node *node = NULL;
     int rc;
 
     module = lys_parse_mem(ctx, lys_module_a, yang_format);
@@ -588,20 +601,20 @@ test_lys_is_disabled(void **state)
         fail();
     }
 
-    feature = lys_is_disabled(module->data->child, 2);
-    if (!feature) {
+    node = lys_is_disabled(module->data->child, 2);
+    if (!node) {
         fail();
     }
 
-    assert_string_equal("bar", feature->name);
+    assert_string_equal("/a:top", node->name);
 
     rc = lys_features_enable(module, "bar");
     if (rc) {
         fail();
     }
 
-    feature = lys_is_disabled(module->data->child, 2);
-    if (feature) {
+    node = lys_is_disabled(module->data->child, 2);
+    if (node) {
         fail();
     }
 }
@@ -797,7 +810,7 @@ test_lys_print_fd_tree(void **state)
     LYS_INFORMAT yang_format = LYS_IN_YIN;
     struct stat sb;
     char *target = "top";
-    char file_name[19];
+    char file_name[20];
     char *result;
     int rc;
     int fd = -1;
@@ -808,8 +821,7 @@ test_lys_print_fd_tree(void **state)
     }
 
     memset(file_name, 0, sizeof(file_name));
-    strncpy(file_name, "/tmp/libyang-XXXXXX", 21);
-
+    strncpy(file_name, TMP_TEMPLATE, strlen(TMP_TEMPLATE));
 
     fd = mkstemp(file_name);
     if (fd < 1) {
@@ -849,7 +861,7 @@ test_lys_print_fd_yang(void **state)
     LYS_INFORMAT yang_format = LYS_IN_YIN;
     struct stat sb;
     char *target = "top";
-    char file_name[19];
+    char file_name[20];
     char *result;
     int rc;
     int fd = -1;
@@ -860,8 +872,7 @@ test_lys_print_fd_yang(void **state)
     }
 
     memset(file_name, 0, sizeof(file_name));
-    strncpy(file_name, "/tmp/libyang-XXXXXX", 21);
-
+    strncpy(file_name, TMP_TEMPLATE, strlen(TMP_TEMPLATE));
 
     fd = mkstemp(file_name);
     if (fd < 1) {
@@ -901,7 +912,7 @@ test_lys_print_fd_yin(void **state)
     LYS_INFORMAT yang_format = LYS_IN_YIN;
     struct stat sb;
     char *target = "top";
-    char file_name[19];
+    char file_name[20];
     char *result;
     int rc;
     int fd = -1;
@@ -912,8 +923,7 @@ test_lys_print_fd_yin(void **state)
     }
 
     memset(file_name, 0, sizeof(file_name));
-    strncpy(file_name, "/tmp/libyang-XXXXXX", 21);
-
+    strncpy(file_name, TMP_TEMPLATE, strlen(TMP_TEMPLATE));
 
     fd = mkstemp(file_name);
     if (fd < 1) {
@@ -953,7 +963,7 @@ test_lys_print_fd_info(void **state)
     LYS_INFORMAT yang_format = LYS_IN_YIN;
     struct stat sb;
     char *target = "feature/foo";
-    char file_name[19];
+    char file_name[20];
     char *result;
     int rc;
     int fd = -1;
@@ -964,8 +974,7 @@ test_lys_print_fd_info(void **state)
     }
 
     memset(file_name, 0, sizeof(file_name));
-    strncpy(file_name, "/tmp/libyang-XXXXXX", 21);
-
+    strncpy(file_name, TMP_TEMPLATE, strlen(TMP_TEMPLATE));
 
     fd = mkstemp(file_name);
     if (fd < 1) {
@@ -1005,7 +1014,7 @@ test_lys_print_file_tree(void **state)
     LYS_INFORMAT yang_format = LYS_IN_YIN;
     struct stat sb;
     char *target = "top";
-    char file_name[19];
+    char file_name[20];
     char *result;
     FILE *f = NULL;
     int rc;
@@ -1017,8 +1026,7 @@ test_lys_print_file_tree(void **state)
     }
 
     memset(file_name, 0, sizeof(file_name));
-    strncpy(file_name, "/tmp/libyang-XXXXXX", 21);
-
+    strncpy(file_name, TMP_TEMPLATE, strlen(TMP_TEMPLATE));
 
     fd = mkstemp(file_name);
     if (fd < 1) {
@@ -1069,7 +1077,7 @@ test_lys_print_file_yin(void **state)
     LYS_INFORMAT yang_format = LYS_IN_YIN;
     struct stat sb;
     char *target = "top";
-    char file_name[19];
+    char file_name[20];
     char *result;
     FILE *f = NULL;
     int rc;
@@ -1081,8 +1089,7 @@ test_lys_print_file_yin(void **state)
     }
 
     memset(file_name, 0, sizeof(file_name));
-    strncpy(file_name, "/tmp/libyang-XXXXXX", 21);
-
+    strncpy(file_name, TMP_TEMPLATE, strlen(TMP_TEMPLATE));
 
     fd = mkstemp(file_name);
     if (fd < 1) {
@@ -1133,7 +1140,7 @@ test_lys_print_file_yang(void **state)
     LYS_INFORMAT yang_format = LYS_IN_YIN;
     struct stat sb;
     char *target = "top";
-    char file_name[19];
+    char file_name[20];
     char *result;
     FILE *f = NULL;
     int rc;
@@ -1145,8 +1152,7 @@ test_lys_print_file_yang(void **state)
     }
 
     memset(file_name, 0, sizeof(file_name));
-    strncpy(file_name, "/tmp/libyang-XXXXXX", 21);
-
+    strncpy(file_name, TMP_TEMPLATE, strlen(TMP_TEMPLATE));
 
     fd = mkstemp(file_name);
     if (fd < 1) {
@@ -1197,7 +1203,7 @@ test_lys_print_file_info(void **state)
     LYS_INFORMAT yang_format = LYS_IN_YIN;
     struct stat sb;
     char *target = "feature/foo";
-    char file_name[19];
+    char file_name[20];
     char *result;
     FILE *f = NULL;
     int rc;
@@ -1209,8 +1215,7 @@ test_lys_print_file_info(void **state)
     }
 
     memset(file_name, 0, sizeof(file_name));
-    strncpy(file_name, "/tmp/libyang-XXXXXX", 21);
-
+    strncpy(file_name, TMP_TEMPLATE, strlen(TMP_TEMPLATE));
 
     fd = mkstemp(file_name);
     if (fd < 1) {
@@ -1253,6 +1258,57 @@ error:
     fail();
 }
 
+static void
+test_lys_find_path(void **state)
+{
+    (void) state; /* unused */
+    LYS_INFORMAT yang_format = LYS_IN_YIN;
+    const struct lys_module *module;
+    struct ly_set *set;
+
+    module = lys_parse_mem(ctx, lys_module_a, yang_format);
+    assert_ptr_not_equal(module, NULL);
+
+    set = lys_find_path(module, NULL, "/x/*");
+    assert_ptr_not_equal(set, NULL);
+    assert_int_equal(set->number, 5);
+    ly_set_free(set);
+
+    set = lys_find_path(module, NULL, "/x//*");
+    assert_ptr_not_equal(set, NULL);
+    assert_int_equal(set->number, 6);
+    ly_set_free(set);
+
+    set = lys_find_path(module, NULL, "/x//.");
+    assert_ptr_not_equal(set, NULL);
+    assert_int_equal(set->number, 7);
+    ly_set_free(set);
+}
+
+static void
+test_lys_path(void **state)
+{
+    (void) state; /* unused */
+    LYS_INFORMAT yang_format = LYS_IN_YIN;
+    const struct lys_node *node;
+    const struct lys_module *module;
+    char *path;
+    struct ly_set *set;
+    const char *template;
+
+    module = lys_parse_mem(ctx, lys_module_a, yang_format);
+    assert_ptr_not_equal(module, NULL);
+
+    template = "/a:x/bar-gggg";
+    set = lys_find_path(module, NULL, template);
+    assert_ptr_not_equal(set, NULL);
+    node = set->set.s[0];
+    ly_set_free(set);
+    path = lys_path(node);
+    assert_string_equal(template, path);
+    free(path);
+}
+
 int main(void)
 {
     const struct CMUnitTest tests[] = {
@@ -1279,6 +1335,8 @@ int main(void)
         cmocka_unit_test_setup_teardown(test_lys_print_file_yin, setup_f, teardown_f),
         cmocka_unit_test_setup_teardown(test_lys_print_file_yang, setup_f, teardown_f),
         cmocka_unit_test_setup_teardown(test_lys_print_file_info, setup_f, teardown_f),
+        cmocka_unit_test_setup_teardown(test_lys_find_path, setup_f, teardown_f),
+        cmocka_unit_test_setup_teardown(test_lys_path, setup_f, teardown_f),
     };
 
     return cmocka_run_group_tests(tests, NULL, NULL);

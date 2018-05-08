@@ -7,17 +7,11 @@
  *
  * Author: Mislav Novakovic <mislav.novakovic@sartura.hr>
  *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
+ * This source code is licensed under BSD 3-Clause License (the "License").
+ * You may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *	http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ *     https://opensource.org/licenses/BSD-3-Clause
  */
 
 #include <stdarg.h>
@@ -33,10 +27,12 @@
 #include <unistd.h>
 #include <string.h>
 
-#include "../config.h"
-#include "../../src/libyang.h"
+#include "tests/config.h"
+#include "libyang.h"
 #include "../../src/tree_data.h"
 #include "../../src/tree_schema.h"
+
+#define TMP_TEMPLATE "/tmp/libyang-XXXXXX"
 
 struct ly_ctx *ctx = NULL;
 struct lyd_node *root = NULL;
@@ -50,17 +46,24 @@ const char *lys_module_a = \
 "<?xml version=\"1.0\" encoding=\"UTF-8\"?>           \
 <module name=\"a\"                                    \
         xmlns=\"urn:ietf:params:xml:ns:yang:yin:1\"   \
+        xmlns:md=\"urn:ietf:params:xml:ns:yang:ietf-yang-metadata\"\
         xmlns:a=\"urn:a\">                            \
   <namespace uri=\"urn:a\"/>                          \
   <prefix value=\"a_mod\"/>                           \
   <include module=\"asub\"/>                          \
   <include module=\"atop\"/>                          \
+  <import module=\"ietf-yang-metadata\">              \
+    <prefix value=\"md\"/>                            \
+  </import>                                           \
   <feature name=\"foo\"/>                             \
   <grouping name=\"gg\">                              \
     <leaf name=\"bar-gggg\">                          \
       <type name=\"string\"/>                         \
     </leaf>                                           \
   </grouping>                                         \
+  <md:annotation name=\"test\">                       \
+    <type name=\"string\"/>                           \
+  </md:annotation>                                    \
   <container name=\"x\">                              \
     <leaf name=\"bar-leaf\">                          \
       <if-feature name=\"bar\"/>                      \
@@ -83,6 +86,8 @@ const char *lys_module_a = \
       <type name=\"int64\"/>                          \
     </leaf>                                           \
   </container>                                        \
+  <leaf name=\"y\"><type name=\"string\"/></leaf>     \
+  <anyxml name=\"any\"/>                              \
   <augment target-node=\"/x\">                        \
     <if-feature name=\"bar\"/>                        \
     <container name=\"bar-y\"/>                       \
@@ -158,39 +163,42 @@ generic_init(char *config_file, const char *module, char *yang_folder)
     struct stat sb_config;
     int fd = -1;
 
-
-    if (!config_file || !module || !yang_folder) {
+    if (!yang_folder) {
         goto error;
     }
 
     yang_format = LYS_IN_YIN;
     in_format = LYD_XML;
 
-    ctx = ly_ctx_new(yang_folder);
+    ctx = ly_ctx_new(yang_folder, 0);
     if (!ctx) {
         goto error;
     }
 
-    fd = open(config_file, O_RDONLY);
-    if (fd == -1 || fstat(fd, &sb_config) == -1 || !S_ISREG(sb_config.st_mode)) {
+    if (module && !lys_parse_mem(ctx, module, yang_format)) {
         goto error;
     }
 
-    config = mmap(NULL, sb_config.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
-    close(fd);
-    fd = -1;
+    if (config_file) {
+        fd = open(config_file, O_RDONLY);
+        if (fd == -1 || fstat(fd, &sb_config) == -1 || !S_ISREG(sb_config.st_mode)) {
+            goto error;
+        }
 
-    if (!lys_parse_mem(ctx, lys_module_a, yang_format)) {
-        goto error;
+        config = mmap(NULL, sb_config.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
+        close(fd);
+        fd = -1;
+
+        root = lyd_parse_mem(ctx, config, in_format, LYD_OPT_CONFIG | LYD_OPT_STRICT);
+        if (!root) {
+            goto error;
+        }
+
+        /* cleanup */
+        munmap(config, sb_config.st_size);
+    } else {
+        root = NULL;
     }
-
-    root = lyd_parse_mem(ctx, config, in_format, LYD_OPT_CONFIG | LYD_OPT_STRICT);
-    if (!root) {
-        goto error;
-    }
-
-    /* cleanup */
-    munmap(config, sb_config.st_size);
 
     return 0;
 
@@ -206,15 +214,32 @@ error:
 }
 
 static int
+setup_f2(void **state)
+{
+    *state = ly_ctx_new(NULL, 0);
+    if (!*state) {
+        return -1;
+    }
+
+    return 0;
+}
+
+static int
+teardown_f2(void **state)
+{
+    ly_ctx_destroy((struct ly_ctx *)(*state), NULL);
+    return 0;
+}
+
+static int
 setup_f(void **state)
 {
     (void) state; /* unused */
     char *config_file = TESTS_DIR"/api/files/a.xml";
-    const char *module = lys_module_a;
     char *yang_folder = TESTS_DIR"/api/files";
     int rc;
 
-    rc = generic_init(config_file, module, yang_folder);
+    rc = generic_init(config_file, lys_module_a, yang_folder);
 
     if (rc) {
         return -1;
@@ -228,7 +253,7 @@ teardown_f(void **state)
 {
     (void) state; /* unused */
     if (root)
-        lyd_free(root);
+        lyd_free_withsiblings(root);
     if (ctx)
         ly_ctx_destroy(ctx, NULL);
 
@@ -245,7 +270,7 @@ test_lyd_parse_mem(void **state)
     struct ly_ctx *ctx = NULL;
     struct lyd_node *root = NULL;
 
-    ctx = ly_ctx_new(yang_folder);
+    ctx = ly_ctx_new(yang_folder, 0);
     if (!ctx) {
         goto error;
     }
@@ -288,7 +313,7 @@ test_lyd_parse_fd(void **state)
     struct stat sb;
     int fd = -1;
 
-    ctx = ly_ctx_new(yang_folder);
+    ctx = ly_ctx_new(yang_folder, 0);
     if (!ctx) {
         goto error;
     }
@@ -337,7 +362,7 @@ test_lyd_parse_path(void **state)
     struct ly_ctx *ctx = NULL;
     struct lyd_node *root = NULL;
 
-    ctx = ly_ctx_new(yang_folder);
+    ctx = ly_ctx_new(yang_folder, 0);
     if (!ctx) {
         goto error;
     }
@@ -377,7 +402,7 @@ test_lyd_parse_xml(void **state)
     LYS_INFORMAT yang_format = LYS_IN_YIN;
     struct ly_ctx *ctx = NULL;
 
-    ctx = ly_ctx_new(yang_folder);
+    ctx = ly_ctx_new(yang_folder, 0);
     if (!ctx) {
         goto error;
     }
@@ -489,38 +514,40 @@ test_lyd_new_path(void **state)
 {
     (void) state; /* unused */
     struct lyd_node *node, *root;
+    char *str;
+    struct lyxml_elem *xml;
 
-    root = lyd_new_path(NULL, ctx, "/a:x/bar-gggg", "a", 0);
+    root = lyd_new_path(NULL, ctx, "/a:x/bar-gggg", "a", 0, 0);
     assert_non_null(root);
     assert_string_equal(root->schema->name, "x");
     assert_string_equal(root->child->schema->name, "bar-gggg");
 
-    node = lyd_new_path(root, NULL, "bubba", "b", 0);
+    node = lyd_new_path(root, NULL, "bubba", "b", 0, 0);
     assert_non_null(node);
     assert_string_equal(node->schema->name, "bubba");
 
-    node = lyd_new_path(root, NULL, "/a:x/number32", "3", 0);
+    node = lyd_new_path(root, NULL, "/a:x/number32", "3", 0, 0);
     assert_non_null(node);
     assert_string_equal(node->schema->name, "number32");
 
-    node = lyd_new_path(root, NULL, "a:number64", "64", 0);
+    node = lyd_new_path(root, NULL, "a:number64", "64", 0, 0);
     assert_non_null(node);
     assert_string_equal(node->schema->name, "number64");
 
-    node = lyd_new_path(root, NULL, "/a:l[key1='111'][key2='222']", NULL, 0);
+    node = lyd_new_path(root, NULL, "/a:l[key1='111'][key2='222']", NULL, 0, 0);
     assert_non_null(node);
     assert_string_equal(node->schema->name, "l");
     assert_ptr_not_equal(root->prev, root);
 
     lyd_free_withsiblings(root);
 
-    root = lyd_new_path(NULL, ctx, "/a:l[key1='1'][key2='2']", NULL, 0);
+    root = lyd_new_path(NULL, ctx, "/a:l[key1='1'][key2='2']", NULL, 0, 0);
     assert_non_null(root);
     assert_string_equal(root->schema->name, "l");
     assert_string_equal(root->child->schema->name, "key1");
     assert_string_equal(root->child->next->schema->name, "key2");
 
-    node = lyd_new_path(root, NULL, "/a:l[key1='11'][key2='22']/value", "val", 0);
+    node = lyd_new_path(root, NULL, "/a:l[key1='11'][key2='22']/value", "val", 0, 0);
     assert_non_null(node);
     assert_ptr_not_equal(root->prev, root);
     assert_string_equal(node->schema->name, "l");
@@ -528,19 +555,48 @@ test_lyd_new_path(void **state)
     assert_string_equal(node->child->next->schema->name, "key2");
     assert_string_equal(node->child->next->next->schema->name, "value");
 
-    node = lyd_new_path(root, NULL, "/a:l[key1='1'][key2='2']/value", "val2", 0);
+    node = lyd_new_path(root, NULL, "/a:l[key1='1'][key2='2']/value", "val2", 0, 0);
     assert_non_null(node);
     assert_string_equal(node->schema->name, "value");
 
     lyd_free_withsiblings(root);
 
-    root = lyd_new_path(NULL, ctx, "/a:rpc1/x/input-leaf2", "dudu", 0);
+    root = lyd_new_path(NULL, ctx, "/a:any", "test <&>\"", LYD_ANYDATA_CONSTSTRING, 0);
+    assert_non_null(root);
+    str = NULL;
+    lyd_print_mem(&str, root, LYD_XML, 0);
+    assert_non_null(root);
+    assert_string_equal(str, "<any xmlns=\"urn:a\">test &lt;&amp;&gt;&quot;</any>");
+    free(str);
+    lyd_free(root);
+
+    xml = lyxml_parse_mem(ctx, "<test>&lt;</test>", 0);
+    assert_non_null(xml);
+    root = lyd_new_path(NULL, ctx, "/a:any", xml, LYD_ANYDATA_XML, 0);
+    xml = NULL;
+    assert_non_null(root);
+    lyd_print_mem(&str, root, LYD_XML, 0);
+    assert_non_null(root);
+    assert_string_equal(str, "<any xmlns=\"urn:a\"><test>&lt;</test></any>");
+    free(str);
+
+    node = root;
+    root = lyd_new_path(NULL, ctx, "/a:any", node, LYD_ANYDATA_DATATREE, 0);
+    assert_non_null(root);
+    str = NULL;
+    lyd_print_mem(&str, root, LYD_XML, 0);
+    assert_non_null(root);
+    assert_string_equal(str, "<any xmlns=\"urn:a\"><any xmlns=\"urn:a\"><test>&lt;</test></any></any>");
+    free(str);
+    lyd_free(root);
+
+    root = lyd_new_path(NULL, ctx, "/a:rpc1/x/input-leaf2", "dudu", 0, 0);
     assert_non_null(root);
     assert_string_equal(root->schema->name, "rpc1");
     assert_string_equal(root->child->schema->name, "x");
     assert_string_equal(root->child->child->schema->name, "input-leaf2");
 
-    node = lyd_new_path(root, NULL, "/a:rpc1/input-leaf1", "bubu", 0);
+    node = lyd_new_path(root, NULL, "/a:rpc1/input-leaf1", "bubu", 0, 0);
     assert_non_null(node);
     assert_string_equal(node->schema->name, "input-leaf1");
     assert_string_equal(root->child->schema->name, "input-leaf1");
@@ -548,26 +604,60 @@ test_lyd_new_path(void **state)
 
     lyd_free(root);
 
-    root = lyd_new_path(NULL, ctx, "/a:rpc1/rpc-container", NULL, LYD_PATH_OPT_OUTPUT);
+    root = lyd_new_path(NULL, ctx, "/a:rpc1/rpc-container", NULL, 0, LYD_PATH_OPT_OUTPUT);
     assert_non_null(root);
     assert_string_equal(root->schema->name, "rpc1");
 
-    node = lyd_new_path(root->child, NULL, "output-leaf3", "cc", LYD_PATH_OPT_OUTPUT);
+    node = lyd_new_path(root->child, NULL, "output-leaf3", "cc", 0, LYD_PATH_OPT_OUTPUT);
     assert_non_null(node);
     assert_string_equal(node->schema->name, "output-leaf3");
 
-    node = lyd_new_path(root, NULL, "/a:rpc1/output-leaf1", "aa", LYD_PATH_OPT_OUTPUT);
+    node = lyd_new_path(root, NULL, "/a:rpc1/output-leaf1", "aa", 0, LYD_PATH_OPT_OUTPUT);
     assert_non_null(node);
     assert_string_equal(node->schema->name, "output-leaf1");
     assert_ptr_equal(node, root->child);
 
-    node = lyd_new_path(root, NULL, "/a:rpc1/output-leaf2", "bb", LYD_PATH_OPT_OUTPUT);
+    node = lyd_new_path(root, NULL, "/a:rpc1/output-leaf2", "bb", 0, LYD_PATH_OPT_OUTPUT);
     assert_non_null(node);
     assert_string_equal(node->schema->name, "output-leaf2");
     assert_string_equal(node->prev->schema->name, "output-leaf1");
     assert_string_equal(node->next->schema->name, "rpc-container");
 
     lyd_free(root);
+
+    root = lyd_new_path(NULL, ctx, "/a:l", NULL, 0, 0);
+    assert_non_null(root);
+    assert_string_equal(root->schema->name, "l");
+
+    node = lyd_new_path(root, NULL, "/a:l[key1='11'][key2='22']/value", "val", 0, 0);
+    assert_non_null(node);
+    assert_ptr_not_equal(root->prev, root);
+    assert_string_equal(node->schema->name, "l");
+    assert_string_equal(node->child->schema->name, "key1");
+
+    node = lyd_new_path(root, NULL, "/a:l[1]/key1", "1", 0, 0);
+    assert_non_null(node);
+    assert_string_equal(node->schema->name, "key1");
+
+    node = lyd_new_path(root, NULL, "/a:l[1]/key2", "2", 0, 0);
+    assert_non_null(node);
+    assert_string_equal(node->schema->name, "key2");
+
+    node = lyd_new_path(root, NULL, "/a:l[1]/value", "vall", 0, 0);
+    assert_non_null(node);
+    assert_string_equal(node->schema->name, "value");
+
+    node = lyd_new_path(root, NULL, "/a:l[2]/value", "vall", 0, 0);
+    assert_null(node);
+
+    node = lyd_new_path(root, NULL, "/a:l[3]/value", "vall", 0, 0);
+    assert_non_null(node);
+    assert_string_equal(node->schema->name, "l");
+
+    node = lyd_new_path(root, NULL, "/a:l[0]", NULL, 0, 0);
+    assert_null(node);
+
+    lyd_free_withsiblings(root);
 }
 
 static void
@@ -597,9 +687,6 @@ test_lyd_insert(void **state)
 
     result = (struct lyd_node_leaf_list *) root->child;
     assert_string_equal("test", result->value_str);
-    if (root->child->next) {
-        fail();
-    }
 
     new = lyd_new_leaf(root, node->schema->module, "number32", "100");
     if (!new) {
@@ -611,8 +698,42 @@ test_lyd_insert(void **state)
         fail();
     }
 
-    result = (struct lyd_node_leaf_list *) root->child->next;
+    result = (struct lyd_node_leaf_list *) root->child->prev;
     assert_string_equal("100", result->value_str);
+
+    /* test inserting an empty container that is already present */
+    node = NULL;
+    assert_int_equal(lyd_validate(&node, LYD_OPT_CONFIG, ctx), 0);
+    assert_ptr_not_equal(node, NULL);
+    assert_string_equal(node->schema->name, "top");
+    assert_ptr_not_equal(node->child, NULL);
+    assert_string_equal(node->child->schema->name, "bar-sub2");
+    assert_int_equal(node->child->dflt, 1);
+
+    new = lyd_new_path(NULL, ctx, "/a:top/bar-sub2", NULL, 0, 0);
+    assert_ptr_not_equal(new, NULL);
+    assert_string_equal(new->schema->name, "top");
+    assert_int_equal(lyd_insert(node, new->child), 0);
+    assert_int_not_equal(node->child->dflt, 1);
+
+    lyd_free_withsiblings(node);
+    lyd_free_withsiblings(new);
+}
+
+static void
+test_lyd_insert_sibling(void **state)
+{
+    (void) state; /* unused */
+    struct lyd_node *new = NULL, *last;
+
+    new = lyd_new_leaf(NULL, root->schema->module, "y", "test");
+    assert_ptr_not_equal(new, NULL);
+    last = root->prev;
+
+    assert_int_equal(lyd_insert_sibling(&root, new), 0);
+    assert_ptr_not_equal(last, root->prev);
+    assert_string_equal(root->prev->schema->name, "y");
+    assert_string_equal(((struct lyd_node_leaf_list *)root->prev)->value_str, "test");
 }
 
 static void
@@ -625,9 +746,6 @@ test_lyd_insert_before(void **state)
 
     result = (struct lyd_node_leaf_list *) root->child;
     assert_string_equal("test", result->value_str);
-    if (root->child->next) {
-        fail();
-    }
 
     new = lyd_new_leaf(root, root->child->schema->module, "number32", "1");
     if (!new) {
@@ -649,7 +767,7 @@ test_lyd_insert_before(void **state)
         fail();
     }
 
-    result = (struct lyd_node_leaf_list *) root->child->next->next;
+    result = (struct lyd_node_leaf_list *) root->child->prev;
     assert_string_equal("1", result->value_str);
 }
 
@@ -663,9 +781,6 @@ test_lyd_insert_after(void **state)
 
     result = (struct lyd_node_leaf_list *) root->child;
     assert_string_equal("test", result->value_str);
-    if (root->child->next) {
-        fail();
-    }
 
     new = lyd_new_leaf(root, root->child->schema->module, "number32", "1");
     if (!new) {
@@ -698,7 +813,7 @@ test_lyd_schema_sort(void **state)
     const struct lys_module *module;
     struct lyd_node *root, *node, *node2;
 
-    module = ly_ctx_get_module(ctx, "a", NULL);
+    module = ly_ctx_get_module(ctx, "a", NULL, 0);
     assert_non_null(module);
 
     root = lyd_new(NULL, module, "l");
@@ -758,13 +873,13 @@ test_lyd_schema_sort(void **state)
 }
 
 static void
-test_lyd_get_node(void **state)
+test_lyd_find_path(void **state)
 {
     (void) state; /* unused */
     struct ly_set *set = NULL;
     struct lyd_node_leaf_list *result;
 
-    set = lyd_get_node(root->child, "/a:x/bubba");
+    set = lyd_find_path(root->child, "/a:x/bubba");
 
     struct lyd_node *node = *set->set.d;
     result = (struct lyd_node_leaf_list *) node;
@@ -774,13 +889,13 @@ test_lyd_get_node(void **state)
 }
 
 static void
-test_lyd_get_node_2(void **state)
+test_lyd_find_instance(void **state)
 {
     (void) state; /* unused */
     struct ly_set *set = NULL;
     struct lyd_node_leaf_list *result;
 
-    set = lyd_get_node2(root->child, root->child->schema);
+    set = lyd_find_instance(root->child, root->child->schema);
     if (!set) {
         fail();
     }
@@ -800,7 +915,7 @@ test_lyd_validate(void **state)
     struct lyd_node *node = root;
     int rc;
 
-    rc = lyd_validate(&root, LYD_OPT_CONFIG);
+    rc = lyd_validate(&root, LYD_OPT_CONFIG, NULL);
     if (rc) {
         fail();
     }
@@ -819,7 +934,7 @@ test_lyd_validate(void **state)
         fail();
     }
 
-    rc = lyd_validate(&root, LYD_OPT_CONFIG);
+    rc = lyd_validate(&root, LYD_OPT_CONFIG, NULL);
     if (rc) {
         fail();
     }
@@ -844,17 +959,15 @@ test_lyd_unlink(void **state)
         fail();
     }
 
-    result = (struct lyd_node_leaf_list *) node->next;
+    result = (struct lyd_node_leaf_list *) node->prev;
     assert_string_equal("1", result->value_str);
 
-    rc = lyd_unlink(node->next);
+    rc = lyd_unlink(node->prev);
     if (rc) {
         fail();
     }
 
-    if (node->next) {
-        fail();
-    }
+    assert_string_not_equal("1", ((struct lyd_node_leaf_list *)node->prev)->value_str);
 
     lyd_free(new);
 }
@@ -990,12 +1103,12 @@ test_lyd_print_fd_xml(void **state)
     (void) state; /* unused */
     char *result = NULL;
     struct stat sb;
-    char file_name[19];
+    char file_name[20];
     int rc;
     int fd;
 
     memset(file_name, 0, sizeof(file_name));
-    strncpy(file_name, "/tmp/libyang-XXXXXX", 21);
+    strncpy(file_name, TMP_TEMPLATE, strlen(TMP_TEMPLATE));
 
     fd = mkstemp(file_name);
     if (fd < 1) {
@@ -1033,12 +1146,12 @@ test_lyd_print_fd_xml_format(void **state)
     (void) state; /* unused */
     char *result = NULL;
     struct stat sb;
-    char file_name[19];
+    char file_name[20];
     int rc;
     int fd;
 
     memset(file_name, 0, sizeof(file_name));
-    strncpy(file_name, "/tmp/libyang-XXXXXX", 21);
+    strncpy(file_name, TMP_TEMPLATE, strlen(TMP_TEMPLATE));
 
     fd = mkstemp(file_name);
     if (fd < 1) {
@@ -1076,12 +1189,12 @@ test_lyd_print_fd_json(void **state)
     (void) state; /* unused */
     char *result = NULL;
     struct stat sb;
-    char file_name[19];
+    char file_name[20];
     int rc;
     int fd;
 
     memset(file_name, 0, sizeof(file_name));
-    strncpy(file_name, "/tmp/libyang-XXXXXX", 21);
+    strncpy(file_name, TMP_TEMPLATE, strlen(TMP_TEMPLATE));
 
     fd = mkstemp(file_name);
     if (fd < 1) {
@@ -1118,14 +1231,14 @@ test_lyd_print_file_xml(void **state)
 {
     (void) state; /* unused */
     struct stat sb;
-    char file_name[19];
+    char file_name[20];
     char *result;
     FILE *f = NULL;
     int rc;
     int fd;
 
     memset(file_name, 0, sizeof(file_name));
-    strncpy(file_name, "/tmp/libyang-XXXXXX", 21);
+    strncpy(file_name, TMP_TEMPLATE, strlen(TMP_TEMPLATE));
 
     fd = mkstemp(file_name);
     if (fd < 1) {
@@ -1173,14 +1286,14 @@ test_lyd_print_file_xml_format(void **state)
 {
     (void) state; /* unused */
     struct stat sb;
-    char file_name[19];
+    char file_name[20];
     char *result;
     FILE *f = NULL;
     int rc;
     int fd;
 
     memset(file_name, 0, sizeof(file_name));
-    strncpy(file_name, "/tmp/libyang-XXXXXX", 21);
+    strncpy(file_name, TMP_TEMPLATE, strlen(TMP_TEMPLATE));
 
     fd = mkstemp(file_name);
     if (fd < 1) {
@@ -1228,14 +1341,14 @@ test_lyd_print_file_json(void **state)
 {
     (void) state; /* unused */
     struct stat sb;
-    char file_name[19];
+    char file_name[20];
     char *result;
     FILE *f = NULL;
     int rc;
     int fd = -1;
 
     memset(file_name, 0, sizeof(file_name));
-    strncpy(file_name, "/tmp/libyang-XXXXXX", 21);
+    strncpy(file_name, TMP_TEMPLATE, strlen(TMP_TEMPLATE));
 
     fd = mkstemp(file_name);
     if (fd < 1) {
@@ -1390,6 +1503,45 @@ test_lyd_path(void **state)
     free(str);
 }
 
+static void
+test_lyd_leaf_type(void **state)
+{
+    struct ly_ctx *ctx = (struct ly_ctx *)*state;
+    const char *yang = "module x {"
+"  namespace urn:x;"
+"  prefix x;"
+"  yang-version 1.1;"
+"  container x {"
+"    leaf str { type string; }"
+"    leaf e { type enumeration { enum ftp; enum http; } }"
+"    leaf u { type union {"
+"               type leafref { path \"../e\"; }"
+"               type leafref { path \"../str\";}"
+"           }            }"
+"} }";
+    const char *xml1 = "<x xmlns=\"urn:x\"><str>http</str><e>ftp</e><u>http</u></x>";
+    const char *xml2 = "<x xmlns=\"urn:x\"><str>http</str><e>ftp</e><u>ftp</u></x>";
+    struct lyd_node *data;
+
+    assert_ptr_not_equal(lys_parse_mem(ctx, yang, LYS_IN_YANG), 0);
+
+    data = lyd_parse_mem(ctx, xml1, LYD_XML, LYD_OPT_CONFIG);
+    assert_ptr_not_equal(data, NULL);
+    assert_int_equal(lyd_leaf_type((struct lyd_node_leaf_list *)data->child->prev)->base, LY_TYPE_STRING);
+    lyd_free_withsiblings(data);
+
+    data = lyd_parse_mem(ctx, xml2, LYD_XML, LYD_OPT_CONFIG);
+    assert_ptr_not_equal(data, NULL);
+    assert_int_equal(lyd_leaf_type((struct lyd_node_leaf_list *)data->child->prev)->base, LY_TYPE_ENUM);
+    lyd_free_withsiblings(data);
+
+    data = lyd_parse_mem(ctx, xml2, LYD_XML, LYD_OPT_CONFIG);
+    assert_ptr_not_equal(data, NULL);
+    lyd_change_leaf((struct lyd_node_leaf_list *)data->child->prev, "ssh");
+    assert_int_equal(lyd_leaf_type((struct lyd_node_leaf_list *)data->child->prev), NULL);
+    lyd_free_withsiblings(data);
+}
+
 int main(void)
 {
     const struct CMUnitTest tests[] = {
@@ -1404,11 +1556,12 @@ int main(void)
         cmocka_unit_test_setup_teardown(test_lyd_new_path, setup_f, teardown_f),
         cmocka_unit_test_setup_teardown(test_lyd_dup, setup_f, teardown_f),
         cmocka_unit_test_setup_teardown(test_lyd_insert, setup_f, teardown_f),
+        cmocka_unit_test_setup_teardown(test_lyd_insert_sibling, setup_f, teardown_f),
         cmocka_unit_test_setup_teardown(test_lyd_insert_before, setup_f, teardown_f),
         cmocka_unit_test_setup_teardown(test_lyd_insert_after, setup_f, teardown_f),
         cmocka_unit_test_setup_teardown(test_lyd_schema_sort, setup_f, teardown_f),
-        cmocka_unit_test_setup_teardown(test_lyd_get_node, setup_f, teardown_f),
-        cmocka_unit_test_setup_teardown(test_lyd_get_node_2, setup_f, teardown_f),
+        cmocka_unit_test_setup_teardown(test_lyd_find_path, setup_f, teardown_f),
+        cmocka_unit_test_setup_teardown(test_lyd_find_instance, setup_f, teardown_f),
         cmocka_unit_test_setup_teardown(test_lyd_validate, setup_f, teardown_f),
         cmocka_unit_test_setup_teardown(test_lyd_unlink, setup_f, teardown_f),
         cmocka_unit_test_setup_teardown(test_lyd_free, setup_f, teardown_f),
@@ -1428,6 +1581,7 @@ int main(void)
         cmocka_unit_test_setup_teardown(test_lyd_print_clb_xml_format, setup_f, teardown_f),
         cmocka_unit_test_setup_teardown(test_lyd_print_clb_json, setup_f, teardown_f),
         cmocka_unit_test_setup_teardown(test_lyd_path, setup_f, teardown_f),
+        cmocka_unit_test_setup_teardown(test_lyd_leaf_type, setup_f2, teardown_f2),
     };
 
     return cmocka_run_group_tests(tests, NULL, NULL);

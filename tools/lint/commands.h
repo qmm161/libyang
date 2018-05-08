@@ -23,7 +23,7 @@
 
 #include <stdlib.h>
 
-#include "../../src/libyang.h"
+#include "libyang.h"
 
 #define PROMPT "> "
 
@@ -38,6 +38,8 @@ typedef struct {
 	void (*help_func)(void); /* Display command help. */
 	char *helpstring; /* Documentation for this function. */
 } COMMAND;
+
+LYS_INFORMAT get_schema_format(const char *path);
 
 extern COMMAND commands[];
 

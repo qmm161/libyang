@@ -83,6 +83,32 @@ dict_hash(const char *key, size_t len)
     return hash;
 }
 
+/*
+ * Usage:
+ * - init hash to 0
+ * - repeatedly call dict_hash_multi(), provide hash from the last call
+ * - call dict_hash_multi() with key_part = NULL to finish the hash
+ */
+uint32_t
+dict_hash_multi(uint32_t hash, const char *key_part, size_t len)
+{
+    uint32_t i;
+
+    if (key_part) {
+        for (i = 0; i < len; ++i) {
+            hash += key_part[i];
+            hash += (hash << 10);
+            hash ^= (hash >> 6);
+        }
+    } else {
+        hash += (hash << 3);
+        hash ^= (hash >> 11);
+        hash += (hash << 15);
+    }
+
+    return hash;
+}
+
 API void
 lydict_remove(struct ly_ctx *ctx, const char *value)
 {
@@ -90,13 +116,18 @@ lydict_remove(struct ly_ctx *ctx, const char *value)
     uint32_t index;
     struct dict_rec *record, *prev = NULL;
 
-    if (!value || !ctx || !ctx->dict.used) {
+    if (!value || !ctx) {
         return;
     }
 
     len = strlen(value);
 
     pthread_mutex_lock(&ctx->dict.lock);
+
+    if (!ctx->dict.used) {
+        pthread_mutex_unlock(&ctx->dict.lock);
+        return;
+    }
 
     index = dict_hash(value, len) & ctx->dict.hash_mask;
     record = &ctx->dict.recs[index];
@@ -156,10 +187,7 @@ dict_insert(struct ly_ctx *ctx, char *value, size_t len, int zerocopy)
             record->value = value;
         } else {
             record->value = malloc((len + 1) * sizeof *record->value);
-            if (!record->value) {
-                LOGMEM;
-                return NULL;
-            }
+            LY_CHECK_ERR_RETURN(!record->value, LOGMEM, NULL);
             memcpy(record->value, value, len);
             record->value[len] = '\0';
         }
@@ -173,7 +201,7 @@ dict_insert(struct ly_ctx *ctx, char *value, size_t len, int zerocopy)
 
         ctx->dict.used++;
 
-        LOGDBG("DICT: inserting \"%s\"", record->value);
+        LOGDBG(LY_LDGDICT, "inserting \"%s\"", record->value);
         return record->value;
     }
 
@@ -195,7 +223,7 @@ dict_insert(struct ly_ctx *ctx, char *value, size_t len, int zerocopy)
         if (match) {
             /* record found */
             if (record->refcount == DICT_REC_MAXCOUNT) {
-                LOGWRN("DICT: refcount overflow detected, duplicating record");
+                LOGWRN("Refcount overflow detected, duplicating dictionary record");
                 break;
             }
             record->refcount++;
@@ -204,7 +232,7 @@ dict_insert(struct ly_ctx *ctx, char *value, size_t len, int zerocopy)
                 free(value);
             }
 
-            LOGDBG("DICT: inserting (refcount) \"%s\"", record->value);
+            LOGDBG(LY_LDGDICT, "inserting (refcount) \"%s\"", record->value);
             return record->value;
         }
 
@@ -218,19 +246,12 @@ dict_insert(struct ly_ctx *ctx, char *value, size_t len, int zerocopy)
 
     /* create new record and add it behind the last record */
     new = malloc(sizeof *record);
-    if (!new) {
-        LOGMEM;
-        return NULL;
-    }
+    LY_CHECK_ERR_RETURN(!new, LOGMEM, NULL);
     if (zerocopy) {
         new->value = value;
     } else {
         new->value = malloc((len + 1) * sizeof *record->value);
-        if (!new->value) {
-            LOGMEM;
-            free(new);
-            return NULL;
-        }
+        LY_CHECK_ERR_RETURN(!new->value, LOGMEM; free(new), NULL);
         memcpy(new->value, value, len);
         new->value[len] = '\0';
     }
@@ -245,7 +266,7 @@ dict_insert(struct ly_ctx *ctx, char *value, size_t len, int zerocopy)
 
     ctx->dict.used++;
 
-    LOGDBG("DICT: inserting \"%s\" with collision ", new->value);
+    LOGDBG(LY_LDGDICT, "inserting \"%s\" with collision ", new->value);
     return new->value;
 }
 

@@ -17,8 +17,8 @@
 #include <setjmp.h>
 #include <cmocka.h>
 
-#include "../config.h"
-#include "../../src/libyang.h"
+#include "tests/config.h"
+#include "libyang.h"
 
 struct state {
     struct ly_ctx *ctx;
@@ -32,10 +32,10 @@ static const char *data =
   "<interface>"
     "<name>iface1</name>"
     "<description>iface1 dsc</description>"
-    "<type yang:type_attr='1'>ianaift:ethernetCsmacd</type>"
+    "<type>ianaift:ethernetCsmacd</type>"
     "<enabled>true</enabled>"
     "<link-up-down-trap-enable>disabled</link-up-down-trap-enable>"
-    "<ip:ipv4 yang:ip_attr='14'>"
+    "<ip:ipv4>"
       "<ip:enabled>true</ip:enabled>"
       "<ip:forwarding>true</ip:forwarding>"
       "<ip:mtu>68</ip:mtu>"
@@ -52,7 +52,7 @@ static const char *data =
         "<ip:link-layer-address>01:34:56:78:9a:bc:de:f0</ip:link-layer-address>"
       "</ip:neighbor>"
     "</ip:ipv4>"
-    "<ip:ipv6 yang:ip_attr='16'>"
+    "<ip:ipv6>"
       "<ip:enabled>true</ip:enabled>"
       "<ip:forwarding>false</ip:forwarding>"
       "<ip:mtu>1280</ip:mtu>"
@@ -76,10 +76,10 @@ static const char *data =
   "<interface>"
     "<name>iface2</name>"
     "<description>iface2 dsc</description>"
-    "<type yang:type_attr='2'>ianaift:softwareLoopback</type>"
+    "<type>ianaift:softwareLoopback</type>"
     "<enabled>false</enabled>"
     "<link-up-down-trap-enable>disabled</link-up-down-trap-enable>"
-    "<ip:ipv4 yang:ip_attr='24'>"
+    "<ip:ipv4>"
       "<ip:address>"
         "<ip:ip>10.0.0.5</ip:ip>"
         "<ip:netmask>255.0.0.0</ip:netmask>"
@@ -93,7 +93,7 @@ static const char *data =
         "<ip:link-layer-address>01:34:56:78:9a:bc:de:fa</ip:link-layer-address>"
       "</ip:neighbor>"
     "</ip:ipv4>"
-    "<ip:ipv6 yang:ip_attr='26'>"
+    "<ip:ipv6>"
       "<ip:address>"
         "<ip:ip>2001:abcd:ef01:2345:6789:0:1:5</ip:ip>"
         "<ip:prefix-length>64</ip:prefix-length>"
@@ -130,7 +130,7 @@ setup_f(void **state)
     }
 
     /* libyang context */
-    st->ctx = ly_ctx_new(ietfdir);
+    st->ctx = ly_ctx_new(ietfdir, 0);
     if (!st->ctx) {
         fprintf(stderr, "Failed to create context.\n");
         goto error;
@@ -144,7 +144,7 @@ setup_f(void **state)
     }
     lys_features_enable(mod, "*");
 
-    mod = ly_ctx_get_module(st->ctx, "ietf-interfaces", NULL);
+    mod = ly_ctx_get_module(st->ctx, "ietf-interfaces", NULL, 0);
     if (!mod) {
         fprintf(stderr, "Failed to get data module \"ietf-interfaces\".\n");
         goto error;
@@ -193,15 +193,15 @@ test_invalid(void **state)
 {
     struct state *st = (*state);
 
-    st->set = lyd_get_node(st->dt, "/:interface/name");
+    st->set = lyd_find_path(st->dt, "/:interface/name");
     assert_ptr_equal(st->set, NULL);
     assert_int_not_equal(ly_errno, 0);
 
-    st->set = lyd_get_node(st->dt, "/interface/name[./]");
+    st->set = lyd_find_path(st->dt, "/interface/name[./]");
     assert_ptr_equal(st->set, NULL);
     assert_int_not_equal(ly_errno, 0);
 
-    st->set = lyd_get_node(st->dt, "/interface/name[./.]()");
+    st->set = lyd_find_path(st->dt, "/interface/name[./.]()");
     assert_ptr_equal(st->set, NULL);
     assert_int_not_equal(ly_errno, 0);
 }
@@ -211,31 +211,31 @@ test_simple(void **state)
 {
     struct state *st = (*state);
 
-    st->set = lyd_get_node(st->dt, "/ietf-interfaces:interfaces");
+    st->set = lyd_find_path(st->dt, "/ietf-interfaces:interfaces");
     assert_ptr_not_equal(st->set, NULL);
     assert_int_equal(st->set->number, 1);
     ly_set_free(st->set);
     st->set = NULL;
 
-    st->set = lyd_get_node(st->dt, "/ietf-interfaces:interfaces/interface");
+    st->set = lyd_find_path(st->dt, "/ietf-interfaces:interfaces/interface");
     assert_ptr_not_equal(st->set, NULL);
     assert_int_equal(st->set->number, 2);
     ly_set_free(st->set);
     st->set = NULL;
 
-    st->set = lyd_get_node(st->dt, "/ietf-interfaces:interfaces/interface[name='iface1']");
+    st->set = lyd_find_path(st->dt, "/ietf-interfaces:interfaces/interface[name='iface1']");
     assert_ptr_not_equal(st->set, NULL);
     assert_int_equal(st->set->number, 1);
     ly_set_free(st->set);
     st->set = NULL;
 
-    st->set = lyd_get_node(st->dt, "/ietf-interfaces:interfaces/interface[name='iface1']/ietf-ip:ipv4/address");
+    st->set = lyd_find_path(st->dt, "/ietf-interfaces:interfaces/interface[name='iface1']/ietf-ip:ipv4/ietf-ip:address");
     assert_ptr_not_equal(st->set, NULL);
     assert_int_equal(st->set->number, 2);
     ly_set_free(st->set);
     st->set = NULL;
 
-    st->set = lyd_get_node(st->dt, "/ietf-interfaces:interfaces/interface[name='iface1']/ietf-ip:ipv4/address[ip='10.0.0.1']");
+    st->set = lyd_find_path(st->dt, "/ietf-interfaces:interfaces/interface[name='iface1']/ietf-ip:ipv4/ietf-ip:address[ietf-ip:ip='10.0.0.1']");
     assert_ptr_not_equal(st->set, NULL);
     assert_int_equal(st->set->number, 1);
     ly_set_free(st->set);
@@ -247,75 +247,39 @@ test_advanced(void **state)
 {
     struct state *st = (*state);
 
-    st->set = lyd_get_node(st->dt, "/ietf-interfaces:interfaces/interface[name='iface1']/ietf-ip:ipv4/*[ip]");
+    st->set = lyd_find_path(st->dt, "/ietf-interfaces:interfaces/interface[name='iface1']/ietf-ip:ipv4/*[ietf-ip:ip]");
     assert_ptr_not_equal(st->set, NULL);
     assert_int_equal(st->set->number, 3);
     ly_set_free(st->set);
     st->set = NULL;
 
-    st->set = lyd_get_node(st->dt, "/ietf-interfaces:interfaces//*[ietf-ip:ip]");
+    st->set = lyd_find_path(st->dt, "/ietf-interfaces:interfaces//*[ietf-ip:ip]");
     assert_ptr_not_equal(st->set, NULL);
     assert_int_equal(st->set->number, 10);
     ly_set_free(st->set);
     st->set = NULL;
 
-    st->set = lyd_get_node(st->dt, "/ietf-interfaces:interfaces//*[ietf-ip:ip[.='10.0.0.1']]");
+    st->set = lyd_find_path(st->dt, "/ietf-interfaces:interfaces//*[ietf-ip:ip[.='10.0.0.1']]");
     assert_ptr_not_equal(st->set, NULL);
     assert_int_equal(st->set->number, 2);
     ly_set_free(st->set);
     st->set = NULL;
 
-    st->set = lyd_get_node(st->dt, "//ietf-ip:ip[.='10.0.0.1']");
+    st->set = lyd_find_path(st->dt, "//ietf-ip:ip[.='10.0.0.1']");
     assert_ptr_not_equal(st->set, NULL);
     assert_int_equal(st->set->number, 2);
     ly_set_free(st->set);
     st->set = NULL;
 
-    st->set = lyd_get_node(st->dt, "//*[../description]");
+    st->set = lyd_find_path(st->dt, "//*[../description]");
     assert_ptr_not_equal(st->set, NULL);
     assert_int_equal(st->set->number, 14);
     ly_set_free(st->set);
     st->set = NULL;
 
-    st->set = lyd_get_node(st->dt, "//interface[name='iface1']/ipv4//*");
+    st->set = lyd_find_path(st->dt, "//interface[name='iface1']/ietf-ip:ipv4//*");
     assert_ptr_not_equal(st->set, NULL);
     assert_int_equal(st->set->number, 12);
-    ly_set_free(st->set);
-    st->set = NULL;
-}
-
-static void
-test_attributes(void **state)
-{
-    struct state *st = (*state);
-
-    st->set = lyd_get_node(st->dt, "//*[@*]");
-    assert_ptr_not_equal(st->set, NULL);
-    assert_int_equal(st->set->number, 6);
-    ly_set_free(st->set);
-    st->set = NULL;
-
-    st->set = lyd_get_node(st->dt, "//@*/..");
-    assert_ptr_not_equal(st->set, NULL);
-    assert_int_equal(st->set->number, 6);
-    ly_set_free(st->set);
-    st->set = NULL;
-
-    st->set = lyd_get_node(st->dt, "//*[@*[substring(local-name(.),1,2) = 'ip']]");
-    assert_ptr_not_equal(st->set, NULL);
-    assert_int_equal(st->set->number, 4);
-    ly_set_free(st->set);
-    st->set = NULL;
-
-    st->set = lyd_get_node(st->dt, "//*[@*[substring(local-name(.),1,2) = 'ip']]");
-    assert_ptr_not_equal(st->set, NULL);
-    assert_int_equal(st->set->number, 4);
-    ly_set_free(st->set);
-    st->set = NULL;
-
-    st->set = lyd_get_node(st->dt, "//*[@yang:ip_attr > '20']");
-    assert_ptr_not_equal(st->set, NULL);
-    assert_int_equal(st->set->number, 2);
     ly_set_free(st->set);
     st->set = NULL;
 }
@@ -325,60 +289,60 @@ test_functions_operators(void **state)
 {
     struct state *st = (*state);
 
-    st->set = lyd_get_node(st->dt, "/ietf-interfaces:interfaces/interface/name[true() and not(false()) and not(boolean(. != 'iface1'))]");
+    st->set = lyd_find_path(st->dt, "/ietf-interfaces:interfaces/interface/name[true() and not(false()) and not(boolean(. != 'iface1'))]");
     assert_ptr_not_equal(st->set, NULL);
     assert_int_equal(st->set->number, 1);
     assert_string_equal(((struct lyd_node_leaf_list *)st->set->set.d[0])->value_str, "iface1");
     ly_set_free(st->set);
     st->set = NULL;
 
-    st->set = lyd_get_node(st->dt, "/ietf-interfaces:interfaces/interface/name[round(ceiling(1.8)+0.4)+floor(0.28)]");
+    st->set = lyd_find_path(st->dt, "(/ietf-interfaces:interfaces/interface/name)[round(ceiling(1.8)+0.4)+floor(0.28)]");
     assert_ptr_not_equal(st->set, NULL);
     assert_int_equal(st->set->number, 1);
     assert_string_equal(((struct lyd_node_leaf_list *)st->set->set.d[0])->value_str, "iface2");
     ly_set_free(st->set);
     st->set = NULL;
 
-    st->set = lyd_get_node(st->dt, "/ietf-interfaces:interfaces/interface/type[string-length(substring-after(\"hello12hi\", '12')) != 2 or starts-with(.,'iana') and contains(.,'back') and .=substring-before(concat(string(.),'aab', \"abb\"),'aa')]");
+    st->set = lyd_find_path(st->dt, "/ietf-interfaces:interfaces/interface/type[string-length(substring-after(\"hello12hi\", '12')) != 2 or starts-with(.,'iana') and contains(.,'back') and .=substring-before(concat(string(.),'aab', \"abb\"),'aa')]");
     assert_ptr_not_equal(st->set, NULL);
     assert_int_equal(st->set->number, 1);
     assert_string_equal(((struct lyd_node_leaf_list *)st->set->set.d[0])->value_str, "iana-if-type:softwareLoopback");
     ly_set_free(st->set);
     st->set = NULL;
 
-    st->set = lyd_get_node(st->dt, "//*[neighbor/link-layer-address = translate(normalize-space('\t\n01   .34    .56\t.78.9a\n\r.bc.de.f0  \t'), '. ', ':')]");
+    st->set = lyd_find_path(st->dt, "//*[ietf-ip:neighbor/ietf-ip:link-layer-address = translate(normalize-space('\t\n01   .34    .56\t.78.9a\n\r.bc.de.f0  \t'), '. ', ':')]");
     assert_ptr_not_equal(st->set, NULL);
     assert_int_equal(st->set->number, 2);
     ly_set_free(st->set);
     st->set = NULL;
 
-    st->set = lyd_get_node(st->dt, "//ip[position() = last()]");
+    st->set = lyd_find_path(st->dt, "(//ietf-ip:ip)[position() = last()]");
     assert_ptr_not_equal(st->set, NULL);
     assert_int_equal(st->set->number, 1);
     assert_string_equal(((struct lyd_node_leaf_list *)st->set->set.d[0])->value_str, "2001:abcd:ef01:2345:6789:0:1:1");
     ly_set_free(st->set);
     st->set = NULL;
 
-    st->set = lyd_get_node(st->dt, "//ip[count(//*[.='52'])]");
+    st->set = lyd_find_path(st->dt, "(//ietf-ip:ip)[count(//*[.='52'])]");
     assert_ptr_not_equal(st->set, NULL);
     assert_int_equal(st->set->number, 1);
     assert_string_equal(((struct lyd_node_leaf_list *)st->set->set.d[0])->value_str, "10.0.0.1");
     ly_set_free(st->set);
     st->set = NULL;
 
-    st->set = lyd_get_node(st->dt, "//*[local-name()='autoconf' and namespace-uri()='urn:ietf:params:xml:ns:yang:ietf-ip']");
+    st->set = lyd_find_path(st->dt, "//*[local-name()='autoconf' and namespace-uri()='urn:ietf:params:xml:ns:yang:ietf-ip']");
     assert_ptr_not_equal(st->set, NULL);
     assert_int_equal(st->set->number, 2);
     ly_set_free(st->set);
     st->set = NULL;
 
-    st->set = lyd_get_node(st->dt, "//interface[name='iface2']//. | //ip | //interface[number((1 mod (20 - 15)) div 1)]//.");
+    st->set = lyd_find_path(st->dt, "//interface[name='iface2']//. | //ip | //interface[number((1 mod (20 - 15)) div 1)]//.");
     assert_ptr_not_equal(st->set, NULL);
-    assert_int_equal(st->set->number, 64);
+    assert_int_equal(st->set->number, 68);
     ly_set_free(st->set);
     st->set = NULL;
 
-    st->set = lyd_get_node(st->dt, "//ip[position() mod 2 = 1] | //ip[position() mod 2 = 0]");
+    st->set = lyd_find_path(st->dt, "//ietf-ip:ip[position() mod 2 = 1] | //ietf-ip:ip[position() mod 2 = 0]");
     assert_ptr_not_equal(st->set, NULL);
     assert_int_equal(st->set->number, 10);
     assert_string_equal(((struct lyd_node_leaf_list *)st->set->set.d[0])->value_str, "10.0.0.1");
@@ -389,7 +353,7 @@ test_functions_operators(void **state)
     ly_set_free(st->set);
     st->set = NULL;
 
-    st->set = lyd_get_node(st->dt, "//*[1] | //*[last()] | //*[10] | //*[8]//.");
+    st->set = lyd_find_path(st->dt, "(//*)[1] | (//*)[last()] | (//*)[10] | (//*)[8]//.");
     assert_ptr_not_equal(st->set, NULL);
     assert_int_equal(st->set->number, 15);
     ly_set_free(st->set);
@@ -402,7 +366,6 @@ int main(void)
                     cmocka_unit_test_setup_teardown(test_invalid, setup_f, teardown_f),
                     cmocka_unit_test_setup_teardown(test_simple, setup_f, teardown_f),
                     cmocka_unit_test_setup_teardown(test_advanced, setup_f, teardown_f),
-                    cmocka_unit_test_setup_teardown(test_attributes, setup_f, teardown_f),
                     cmocka_unit_test_setup_teardown(test_functions_operators, setup_f, teardown_f),
                     };
 

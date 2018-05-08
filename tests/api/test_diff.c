@@ -17,8 +17,8 @@
 #include <setjmp.h>
 #include <cmocka.h>
 
-#include "../config.h"
-#include "../../src/libyang.h"
+#include "tests/config.h"
+#include "libyang.h"
 
 struct state {
     struct ly_ctx *ctx;
@@ -41,7 +41,7 @@ setup_f(void **state)
     }
 
     /* libyang context */
-    st->ctx = ly_ctx_new(NULL);
+    st->ctx = ly_ctx_new(NULL, 0);
     if (!st->ctx) {
         fprintf(stderr, "Failed to create context.\n");
         goto error;
@@ -365,6 +365,46 @@ test_move2(void **state)
 }
 
 static void
+test_move3(void **state)
+{
+    struct state *st = (*state);
+    const char *xml1 = "<df xmlns=\"urn:libyang:tests:defaults\">"
+                         "<llist>1</llist>"
+                         "<list><name>a</name><value>1</value></list>"
+                         "<llist>2</llist>"
+                         "<llist>3</llist>"
+                         "<llist>4</llist>"
+                       "</df>";
+    const char *xml2 = "<df xmlns=\"urn:libyang:tests:defaults\">"
+                         "<llist>1</llist>"
+                         "<list><name>a</name><value>1</value></list>"
+                         "<llist>2</llist>"
+                         "<llist>4</llist>"
+                         "<llist>3</llist>"
+                       "</df>";
+    char *str;
+    struct lyd_difflist *diff;
+
+    assert_ptr_not_equal((st->first = lyd_parse_mem(st->ctx, xml1, LYD_XML, LYD_OPT_CONFIG)), NULL);
+    assert_ptr_not_equal((st->second = lyd_parse_mem(st->ctx, xml2, LYD_XML, LYD_OPT_CONFIG)), NULL);
+
+    assert_ptr_not_equal((diff = lyd_diff(st->first, st->second, 0)), NULL);
+    assert_ptr_not_equal(diff->type, NULL);
+
+    assert_int_equal(diff->type[0], LYD_DIFF_MOVEDAFTER1);
+    assert_ptr_not_equal(diff->first[0], NULL);
+    assert_string_equal((str = lyd_path(diff->first[0])), "/defaults:df/llist[.='3']");
+    free(str);
+    assert_ptr_not_equal(diff->second[0], NULL);
+    assert_string_equal((str = lyd_path(diff->second[0])), "/defaults:df/llist[.='4']");
+    free(str);
+
+    assert_int_equal(diff->type[1], LYD_DIFF_END);
+
+    lyd_free_diff(diff);
+}
+
+static void
 test_mix1(void **state)
 {
     struct state *st = (*state);
@@ -461,6 +501,65 @@ test_mix2(void **state)
     lyd_free_diff(diff);
 }
 
+static void
+test_wd1(void **state)
+{
+    struct state *st = (*state);
+    const char *xml = "<df xmlns=\"urn:libyang:tests:defaults\">"
+                        "<foo>41</foo><dllist>4</dllist>"
+                      "</df>";
+    char *str;
+    struct lyd_difflist *diff;
+
+    st->first = NULL;
+    lyd_validate(&st->first, LYD_OPT_CONFIG, st->ctx);
+    assert_ptr_not_equal(st->first, NULL);
+    assert_ptr_not_equal((st->second = lyd_parse_mem(st->ctx, xml, LYD_XML, LYD_OPT_CONFIG)), NULL);
+
+    assert_ptr_not_equal((diff = lyd_diff(st->first, st->second, LYD_DIFFOPT_WITHDEFAULTS)), NULL);
+    assert_ptr_not_equal(diff->type, NULL);
+
+    assert_int_equal(diff->type[0], LYD_DIFF_CHANGED);
+    assert_ptr_not_equal(diff->first[0], NULL);
+    assert_string_equal((str = lyd_path(diff->first[0])), "/defaults:df/foo");
+    assert_int_equal(((struct lyd_node_leaf_list*)diff->first[0])->value.int32, 42);
+    free(str);
+    assert_ptr_not_equal(diff->second[0], NULL);
+    assert_string_equal((str = lyd_path(diff->second[0])), "/defaults:df/foo");
+    assert_int_equal(((struct lyd_node_leaf_list*)diff->second[0])->value.int32, 41);
+    free(str);
+
+    assert_int_equal(diff->type[1], LYD_DIFF_DELETED);
+    assert_ptr_not_equal(diff->first[1], NULL);
+    assert_string_equal((str = lyd_path(diff->first[1])), "/defaults:df/dllist[.='1']");
+    free(str);
+    assert_ptr_equal(diff->second[1], NULL);
+
+    assert_int_equal(diff->type[2], LYD_DIFF_DELETED);
+    assert_ptr_not_equal(diff->first[2], NULL);
+    assert_string_equal((str = lyd_path(diff->first[2])), "/defaults:df/dllist[.='2']");
+    free(str);
+    assert_ptr_equal(diff->second[2], NULL);
+
+    assert_int_equal(diff->type[3], LYD_DIFF_DELETED);
+    assert_ptr_not_equal(diff->first[3], NULL);
+    assert_string_equal((str = lyd_path(diff->first[3])), "/defaults:df/dllist[.='3']");
+    free(str);
+    assert_ptr_equal(diff->second[3], NULL);
+
+    assert_int_equal(diff->type[4], LYD_DIFF_CREATED);
+    assert_ptr_not_equal(diff->first[4], NULL);
+    assert_string_equal((str = lyd_path(diff->first[4])), "/defaults:df");
+    free(str);
+    assert_ptr_not_equal(diff->second[4], NULL);
+    assert_string_equal((str = lyd_path(diff->second[4])), "/defaults:df/dllist[.='4']");
+    free(str);
+
+    assert_int_equal(diff->type[5], LYD_DIFF_END);
+
+    lyd_free_diff(diff);
+}
+
 int main(void)
 {
     const struct CMUnitTest tests[] = {
@@ -472,8 +571,10 @@ int main(void)
                     cmocka_unit_test_setup_teardown(test_diff2, setup_f, teardown_f),
                     cmocka_unit_test_setup_teardown(test_move1, setup_f, teardown_f),
                     cmocka_unit_test_setup_teardown(test_move2, setup_f, teardown_f),
+                    cmocka_unit_test_setup_teardown(test_move3, setup_f, teardown_f),
                     cmocka_unit_test_setup_teardown(test_mix1, setup_f, teardown_f),
-                    cmocka_unit_test_setup_teardown(test_mix2, setup_f, teardown_f), };
+                    cmocka_unit_test_setup_teardown(test_mix2, setup_f, teardown_f),
+                    cmocka_unit_test_setup_teardown(test_wd1, setup_f, teardown_f), };
 
     return cmocka_run_group_tests(tests, NULL, NULL);
 }

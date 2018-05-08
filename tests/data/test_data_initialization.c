@@ -25,8 +25,8 @@
 #include <unistd.h>
 #include <string.h>
 
-#include "../config.h"
-#include "../../src/libyang.h"
+#include "tests/config.h"
+#include "libyang.h"
 
 struct ly_ctx *ctx = NULL;
 struct lyd_node *root = NULL;
@@ -48,7 +48,7 @@ generic_init(char *config_file, char *yang_file, char *yang_folder)
     yang_format = LYS_IN_YIN;
     in_format = LYD_XML;
 
-    ctx = ly_ctx_new(yang_folder);
+    ctx = ly_ctx_new(yang_folder, 0);
     if (!ctx) {
         goto error;
     }
@@ -120,7 +120,7 @@ static int
 teardown_f(void **state)
 {
     (void) state; /* unused */
-    lyd_free(root);
+    lyd_free_withsiblings(root);
     ly_ctx_destroy(ctx, NULL);
 
     return 0;
@@ -130,7 +130,7 @@ static void
 test_ctx_new_destroy(void **state)
 {
     (void) state; /* unused */
-    ctx = ly_ctx_new(NULL);
+    ctx = ly_ctx_new(NULL, 0);
     if (!ctx) {
         fail();
     }
@@ -195,10 +195,10 @@ test_yanglibrary(void **state)
     yanglib = ly_ctx_info(ctx);
     assert_non_null(yanglib);
 
-    rc = lyd_validate(&yanglib, LYD_OPT_DATA);
+    rc = lyd_validate(&yanglib, LYD_OPT_DATA, NULL);
 
     /* cleanup */
-    lyd_free(yanglib);
+    lyd_free_withsiblings(yanglib);
 
     assert_int_equal(rc, 0);
 }

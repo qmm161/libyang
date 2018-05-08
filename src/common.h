@@ -3,7 +3,7 @@
  * @author Radek Krejci <rkrejci@cesnet.cz>
  * @brief common internal definitions for libyang
  *
- * Copyright (c) 2015 CESNET, z.s.p.o.
+ * Copyright (c) 2015 - 2017 CESNET, z.s.p.o.
  *
  * This source code is licensed under BSD 3-Clause License (the "License").
  * You may not use this file except in compliance with the License.
@@ -16,15 +16,26 @@
 #define LY_COMMON_H_
 
 #include <stdint.h>
+#include <inttypes.h>
 
-#include "dict_private.h"
 #include "libyang.h"
+#include "dict_private.h"
 #include "resolve.h"
 
 #ifdef __GNUC__
 #  define UNUSED(x) UNUSED_ ## x __attribute__((__unused__))
 #else
 #  define UNUSED(x) UNUSED_ ## x
+#endif
+
+#if __STDC_VERSION__ >= 201112 && !defined __STDC_NO_THREADS__
+# define THREAD_LOCAL _Thread_local
+#elif defined __GNUC__ || \
+      defined __SUNPRO_C || \
+      defined __xlC__
+# define THREAD_LOCAL __thread
+#else
+# error "Cannot define THREAD_LOCAL"
 #endif
 
 #ifndef __WORDSIZE
@@ -44,6 +55,11 @@
 #    define __UINT64_C(c) c ## ULL
 #  endif
 #endif
+
+#define LY_CHECK_GOTO(COND, GOTO) if (COND) {goto GOTO;}
+#define LY_CHECK_ERR_GOTO(COND, ERR, GOTO) if (COND) {ERR; goto GOTO;}
+#define LY_CHECK_RETURN(COND, RETVAL) if (COND) {return RETVAL;}
+#define LY_CHECK_ERR_RETURN(COND, ERR, RETVAL) if (COND) {ERR; return RETVAL;}
 
 /*
  * If the compiler supports attribute to mark objects as hidden, mark all
@@ -68,12 +84,15 @@ struct ly_err {
     uint8_t vlog_hide;
     uint8_t buf_used;
     uint16_t path_index;
-    const void *path_obj;
     char msg[LY_BUF_SIZE];
     char path[LY_BUF_SIZE];
     char apptag[LY_APPTAG_LEN];
     char buf[LY_BUF_SIZE];
 };
+void ly_err_free(void *ptr);
+void ly_err_clean(struct ly_ctx *ctx, int with_errno);
+void ly_err_repeat(struct ly_ctx *ctx);
+extern THREAD_LOCAL struct ly_err ly_err_main;
 
 /**
  * @brief libyang internal thread-specific buffer of LY_BUF_SIZE size
@@ -84,39 +103,47 @@ struct ly_err {
  * possible to duplicate the buffer content and write string back to
  * the buffer when leaving.
  */
-uint8_t *ly_buf_used_location(void);
 char *ly_buf(void);
-#define ly_buf_used (*ly_buf_used_location())
+
+#define ly_buf_used (ly_err_main.buf_used)
 
 /*
  * logger
  */
-extern volatile uint8_t ly_log_level;
+extern volatile int8_t ly_log_level;
 
 void ly_log(LY_LOG_LEVEL level, const char *format, ...);
 
 #define LOGERR(errno, str, args...)                                 \
-	ly_errno = errno;                                               \
-	ly_log(LY_LLERR, str, ##args)
+    if (errno) { ly_errno = errno; }                                \
+    ly_log(LY_LLERR, str, ##args);
 
 #define LOGWRN(str, args...)                                        \
-	if (ly_log_level >= LY_LLWRN) {                                 \
-		ly_log(LY_LLWRN, str, ##args);                              \
-	}
+    if (ly_log_level >= LY_LLWRN) {                                 \
+        ly_log(LY_LLWRN, str, ##args);                              \
+    }
 
 #define LOGVRB(str, args...)                                        \
-	if (ly_log_level >= LY_LLVRB) {                                 \
-		ly_log(LY_LLVRB, str, ##args);                              \
-	}
+    if (ly_log_level >= LY_LLVRB) {                                 \
+        ly_log(LY_LLVRB, str, ##args);                              \
+    }
 
 #ifdef NDEBUG
+
 #define LOGDBG(str, args...)
+
 #else
-#define LOGDBG(str, args...)                                        \
-	if (ly_log_level >= LY_LLDBG) {                                 \
-		ly_log(LY_LLDBG, str, ##args);                              \
-	}
+
+#define LOGDBG(dbg_group, str, args...)                             \
+    if (ly_log_level >= LY_LLDBG) {                                 \
+        ly_log_dbg(dbg_group, str, ##args);                         \
+    }
+
+void ly_log_dbg(LY_LOG_DBG_GROUP group, const char *format, ...);
+
 #endif
+
+#define ly_vlog_hidden (ly_err_main.vlog_hide)
 
 #define LOGMEM LOGERR(LY_EMEM, "Memory allocation failed (%s()).", __func__)
 
@@ -135,6 +162,7 @@ typedef enum {
     LYE_EOF,
     LYE_INSTMT,
     LYE_INCHILDSTMT,
+    LYE_INPAR,
     LYE_INID,
     LYE_INDATE,
     LYE_INARG,
@@ -146,9 +174,13 @@ typedef enum {
     LYE_DUPLEAFLIST,
     LYE_DUPLIST,
     LYE_NOUNIQ,
+    LYE_ENUM_INVAL,
+    LYE_ENUM_INNAME,
     LYE_ENUM_DUPVAL,
     LYE_ENUM_DUPNAME,
     LYE_ENUM_WS,
+    LYE_BITS_INVAL,
+    LYE_BITS_INNAME,
     LYE_BITS_DUPVAL,
     LYE_BITS_DUPNAME,
     LYE_INMOD,
@@ -161,6 +193,12 @@ typedef enum {
     LYE_INREGEX,
     LYE_INRESOLV,
     LYE_INSTATUS,
+    LYE_CIRC_LEAFREFS,
+    LYE_CIRC_FEATURES,
+    LYE_CIRC_IMPORTS,
+    LYE_CIRC_INCLUDES,
+    LYE_INVER,
+    LYE_SUBMODULE,
 
     LYE_OBSDATA,
     LYE_OBSTYPE,
@@ -169,7 +207,7 @@ typedef enum {
     LYE_INELEM_LEN,
     LYE_MISSELEM,
     LYE_INVAL,
-    LYE_INVALATTR,
+    LYE_INMETA,
     LYE_INATTR,
     LYE_MISSATTR,
     LYE_NOCONSTR,
@@ -191,8 +229,12 @@ typedef enum {
     LYE_XPATH_INOP_1,
     LYE_XPATH_INOP_2,
     LYE_XPATH_INCTX,
+    LYE_XPATH_INMOD,
+    LYE_XPATH_INFUNC,
     LYE_XPATH_INARGCOUNT,
     LYE_XPATH_INARGTYPE,
+    LYE_XPATH_DUMMY,
+    LYE_XPATH_NOEND,
 
     LYE_PATH_INCHAR,
     LYE_PATH_INMOD,
@@ -209,14 +251,51 @@ enum LY_VLOG_ELEM {
     LY_VLOG_XML, /* struct lyxml_elem* */
     LY_VLOG_LYS, /* struct lys_node* */
     LY_VLOG_LYD, /* struct lyd_node* */
-    LY_VLOG_STR  /* const char* */
+    LY_VLOG_STR, /* const char* */
+    LY_VLOG_PREV /* use exact same previous path */
 };
-void ly_vlog_hide(int hide);
-void ly_vlog(LY_ECODE code, enum LY_VLOG_ELEM elem_type, const void *elem, ...);
-#define LOGVAL(code, elem_type, elem, args...) ly_vlog(code, elem_type, elem, ##args)
-#define LOGPATH(elem_type, elem) ly_vlog(LYE_PATH, elem_type, elem)
 
-void ly_vlog_build_path_reverse(enum LY_VLOG_ELEM elem_type, const void *elem, char *path, uint16_t *index);
+/*
+ * 0 - normal visibility
+ * 1-254 - do not print messages
+ * 255 - convert errors to warnings
+ */
+void ly_vlog_hide(uint8_t hide);
+
+void ly_vlog(LY_ECODE code, enum LY_VLOG_ELEM elem_type, const void *elem, ...);
+#define LOGVAL(code, elem_type, elem, args...)                      \
+    ly_vlog(code, elem_type, elem, ##args);
+
+#define LOGPATH(elem_type, elem)                                    \
+    ly_vlog(LYE_PATH, elem_type, elem);
+
+/**
+ * @brief Build path of \p elem.
+ *
+ * Either \p length and \p realloc is set or neither is set.
+ *
+ * @param[in] elem_type What to expect in \p elem.
+ * @param[in] elem Element to print.
+ * @param[in,out] path Resulting path printed.
+ * @param[in,out] index Where to start printing, the end of \p path.
+ * @param[out] length Final length of \p path.
+ * @param[in] enlarge Whether to allow \p path to be reallocated and enlarged.
+ * @return 0 on success, -1 on error.
+ */
+int ly_vlog_build_path_reverse(enum LY_VLOG_ELEM elem_type, const void *elem, char **path, uint16_t *index,
+                               uint16_t *length, int enlarge);
+
+/*
+ * - if \p module specified, it searches for submodules, they can be loaded only from a file or via module callback,
+ *   they cannot be get from context
+ * - if \p module is not specified
+ *   - if specific revision is specified, the first try is to get module from the context
+ *   - if no specific revision is specified, it tries to get the newest module - first it searches for the file and
+ *     then checks that the schema loaded from the same source isn't already in context. If the source wasn't
+ *     previously loaded, it is parsed.
+ */
+const struct lys_module *ly_ctx_load_sub_module(struct ly_ctx *ctx, struct lys_module *module, const char *name,
+                                                const char *revision, int implement, struct unres_schema *unres);
 
 /**
  * @brief Basic functionality like strpbrk(3). However, it searches string \p s
@@ -257,6 +336,7 @@ const char *transform_module_name2import_prefix(const struct lys_module *module,
  *
  * @param[in] module Module with imports to use.
  * @param[in] expr JSON expression.
+ * @param[in] inst_id Whether to add prefixes to all node names (XML instance-identifier).
  * @param[out] prefixes Array of pointers to prefixes. After use free them with free(*prefixes).
  * Can be NULL.
  * @param[out] namespaces Array of pointers to full namespaces. After use free them with
@@ -266,8 +346,8 @@ const char *transform_module_name2import_prefix(const struct lys_module *module,
  *
  * @return Transformed XML expression in the dictionary, NULL on error.
  */
-const char *transform_json2xml(const struct lys_module *module, const char *expr, const char ***prefixes, const char ***namespaces,
-                               uint32_t *ns_count);
+const char *transform_json2xml(const struct lys_module *module, const char *expr, int inst_id, const char ***prefixes,
+                               const char ***namespaces, uint32_t *ns_count);
 
 /**
  * @brief Transform expression from JSON format to schema format.
@@ -288,11 +368,14 @@ const char *transform_json2schema(const struct lys_module *module, const char *e
  * @param[in] ctx libyang context to use.
  * @param[in] expr XML expression.
  * @param[in] xml XML element with the expression.
+ * @param[in] inst_id Whether all the node names must have a prefix (XML instance-identifier).
+ * @param[in] use_ctx_data_clb Whether to use data_clb in \p ctx if an unknown module namespace is found.
  * @param[in] log Whether to log errors or not.
  *
  * @return Transformed JSON expression in the dictionary, NULL on error.
  */
-const char *transform_xml2json(struct ly_ctx *ctx, const char *expr, struct lyxml_elem *xml, int log);
+const char *transform_xml2json(struct ly_ctx *ctx, const char *expr, struct lyxml_elem *xml, int inst_id,
+                               int use_ctx_data_clb, int log);
 
 /**
  * @brief Transform expression from the schema format (prefixes of imports) to
@@ -304,6 +387,27 @@ const char *transform_xml2json(struct ly_ctx *ctx, const char *expr, struct lyxm
  * @return Transformed JSON expression in the dictionary, NULL on error.
  */
 const char *transform_schema2json(const struct lys_module *module, const char *expr);
+
+/**
+ * @brief Same as transform_schema2json, but dumbed down, because if-feature expressions
+ *        are not valid XPath expressions.
+ */
+const char *transform_iffeat_schema2json(const struct lys_module *module, const char *expr);
+
+/**
+ * @brief Transform an XPath expression in JSON node naming conventions into
+ *        standard YANG XPath.
+ */
+char *transform_json2xpath(const struct lys_module *cur_module, const char *expr);
+
+/**
+ * @brief Get a new node (non-validated) validity value.
+ *
+ * @param[in] schema Schema node of the new data node.
+ *
+ * @return Validity of the new node.
+ */
+int ly_new_node_validity(const struct lys_node *schema);
 
 /**
  * @brief Wrapper for realloc() call. The only difference is that if it fails to
@@ -328,5 +432,9 @@ int ly_strequal_(const char *s1, const char *s2);
 #define ly_strequal0(s1, s2) ly_strequal_(s1, s2)
 #define ly_strequal1(s1, s2) (s1 == s2)
 #define ly_strequal(s1, s2, d) ly_strequal##d(s1, s2)
+
+int64_t dec_pow(uint8_t exp);
+
+int dec64cmp(int64_t num1, uint8_t dig1, int64_t num2, uint8_t dig2);
 
 #endif /* LY_COMMON_H_ */

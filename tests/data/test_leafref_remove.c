@@ -17,8 +17,8 @@
 #include <setjmp.h>
 #include <cmocka.h>
 
-#include "../config.h"
-#include "../../src/libyang.h"
+#include "tests/config.h"
+#include "libyang.h"
 
 struct state {
     struct ly_ctx *ctx;
@@ -39,7 +39,7 @@ setup_f(void **state)
     }
 
     /* libyang context */
-    st->ctx = ly_ctx_new(NULL);
+    st->ctx = ly_ctx_new(NULL, 0);
     if (!st->ctx) {
         fprintf(stderr, "Failed to create context.\n");
         return -1;
@@ -81,11 +81,11 @@ test_leafref_free(void **state)
     int r;
 
     lyd_free(st->data->child->child->prev);
-    r = lyd_validate(&(st->data), LYD_OPT_CONFIG);
+    r = lyd_validate(&(st->data), LYD_OPT_CONFIG, NULL);
     assert_int_not_equal(r, 0);
 
     lyd_new_leaf(st->data->child, NULL, "name", "jedna");
-    r = lyd_validate(&(st->data), LYD_OPT_CONFIG);
+    r = lyd_validate(&(st->data), LYD_OPT_CONFIG, NULL);
     assert_int_equal(r, 0);
 }
 
@@ -98,11 +98,11 @@ test_leafref_unlink(void **state)
 
     node = st->data->child->child->next;
     lyd_unlink(node);
-    r = lyd_validate(&(st->data), LYD_OPT_CONFIG);
+    r = lyd_validate(&(st->data), LYD_OPT_CONFIG, NULL);
     assert_int_not_equal(r, 0);
 
     lyd_insert(st->data->child, node);
-    r = lyd_validate(&(st->data), LYD_OPT_CONFIG);
+    r = lyd_validate(&(st->data), LYD_OPT_CONFIG, NULL);
     assert_int_equal(r, 0);
 }
 
@@ -115,11 +115,11 @@ test_leafref_unlink2(void **state)
 
     node = st->data->child;
     lyd_unlink(node);
-    r = lyd_validate(&(st->data), LYD_OPT_CONFIG);
+    r = lyd_validate(&(st->data), LYD_OPT_CONFIG, NULL);
     assert_int_not_equal(r, 0);
 
     lyd_insert(st->data, node);
-    r = lyd_validate(&(st->data), LYD_OPT_CONFIG);
+    r = lyd_validate(&(st->data), LYD_OPT_CONFIG, NULL);
     assert_int_equal(r, 0);
 }
 

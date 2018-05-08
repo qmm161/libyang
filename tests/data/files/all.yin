@@ -1,21 +1,26 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <module name="all"
         xmlns="urn:ietf:params:xml:ns:yang:yin:1"
-        xmlns:all_mod="urn:all">
-  <yang-version value="1"/>
+        xmlns:all_mod="urn:all"
+        xmlns:all_imp="urn:all-imp">
+  <yang-version value="1.1"/>
   <namespace uri="urn:all"/>
   <prefix value="all_mod"/>
+  <import module="all-imp">
+    <prefix value="all_imp"/>
+  </import>
   <revision date="2016-05-23"/>
   <revision date="2016-05-22"/>
   <feature name="feat1">
-    <status value="obsolete"/>
     <if-feature name="feat2"/>
+    <status value="obsolete"/>
   </feature>
   <feature name="feat2"/>
-  <identity name="ident1">
-    <base name="ident2"/>
+  <feature name="feat3"/>
+  <identity name="ident2">
+    <base name="ident1"/>
   </identity>
-  <identity name="ident2"/>
+  <identity name="ident1"/>
   <typedef name="tdef1">
     <type name="tdef2">
       <length value="3..9 | 30..40"/>
@@ -38,24 +43,23 @@
   <container name="cont1">
     <leaf name="leaf2">
       <if-feature name="feat1"/>
-      <status value="obsolete"/>
       <type name="int16"/>
+      <status value="obsolete"/>
     </leaf>
     <uses name="group1">
       <if-feature name="feat2"/>
       <refine target-node="leaf1">
+        <if-feature name="feat3"/>
+        <must condition="24 - 4 = number('20')"/>
+        <default value="25"/>
         <config value="true"/>
         <mandatory value="false"/>
         <description>
-          <text>
-            "dsc"
-          </text>
+          <text>dsc</text>
         </description>
         <reference>
-          <text>"none"</text>
+          <text>none</text>
         </reference>
-        <must condition="24 - 4 = number('20')"/>
-        <default value="25"/>
       </refine>
     </uses>
     <leaf name="leaf3">
@@ -64,10 +68,10 @@
     <leaf name="leaf4">
       <type name="int64">
         <range value="1000 .. 50000">
-          <error-app-tag value="special-tag"/>
           <error-message>
             <value>Special error message.</value>
           </error-message>
+          <error-app-tag value="special-tag"/>
         </range>
       </type>
     </leaf>
@@ -84,17 +88,20 @@
       <type name="uint64"/>
     </leaf>
     <choice name="choic1">
-      <default value="leaf10"/>
-      <leaf name="leaf9">
+      <default value="leaf9b"/>
+      <leaf name="leaf9a">
         <type name="decimal64">
           <fraction-digits value="9"/>
         </type>
       </leaf>
-      <leaf name="leaf10">
+      <leaf name="leaf9b">
         <type name="boolean"/>
         <default value="false"/>
       </leaf>
     </choice>
+    <leaf name="leaf10">
+      <type name="boolean"/>
+    </leaf>
     <leaf name="leaf11">
       <type name="enumeration">
         <enum name="one"/>
@@ -150,15 +157,52 @@
         <type name="uint32"/>
       </leaf>
       <anyxml name="axml1"/>
+      <action name="act1">
+        <input>
+          <leaf name="leaf24">
+            <type name="string"/>
+          </leaf>
+        </input>
+        <output>
+          <leaf name="leaf25">
+            <type name="string"/>
+          </leaf>
+        </output>
+      </action>
+      <notification name="notif1">
+        <leaf name="leaf26">
+          <type name="string"/>
+        </leaf>
+      </notification>
     </list>
     <leaf-list name="llist1">
       <type name="tdef1"/>
       <ordered-by value="user"/>
     </leaf-list>
+    <list name="list2">
+      <key value="leaf27 leaf28"/>
+      <leaf name="leaf27">
+        <type name="uint8"/>
+      </leaf>
+      <leaf name="leaf28">
+        <type name="uint8"/>
+      </leaf>
+    </list>
+    <leaf name="leaf29">
+      <type name="instance-identifier"/>
+    </leaf>
     <leaf name="leaf23">
       <type name="empty"/>
     </leaf>
   </container>
+  <augment target-node="/cont1">
+    <leaf name="leaf17">
+      <type name="identityref">
+        <base name="all_imp:ident4"/>
+      </type>
+      <must condition="../leaf17 = 'all_imp:ident5'"/>
+    </leaf>
+  </augment>
   <rpc name="rpc1">
     <input>
       <leaf name="leaf20">
@@ -178,11 +222,4 @@
       <type name="empty"/>
     </leaf>
   </notification>
-  <augment target-node="/cont1">
-    <leaf name="leaf17">
-      <type name="identityref">
-        <base name="ident1"/>
-      </type>
-    </leaf>
-  </augment>
 </module>

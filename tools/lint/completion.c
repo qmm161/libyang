@@ -21,7 +21,7 @@
 
 #include "commands.h"
 #include "../../linenoise/linenoise.h"
-#include "../../src/libyang.h"
+#include "libyang.h"
 
 extern struct ly_ctx *ctx;
 
@@ -29,6 +29,7 @@ static void
 get_cmd_completion(const char *hint, char ***matches, unsigned int *match_count)
 {
     int i;
+    void *p;
 
     *match_count = 0;
     *matches = NULL;
@@ -36,7 +37,12 @@ get_cmd_completion(const char *hint, char ***matches, unsigned int *match_count)
     for (i = 0; commands[i].name; i++) {
         if (!strncmp(hint, commands[i].name, strlen(hint))) {
             ++(*match_count);
-            *matches = realloc(*matches, *match_count * sizeof **matches);
+            p = realloc(*matches, *match_count * sizeof **matches);
+            if (!p) {
+                fprintf(stderr, "Memory allocation failed (%s:%d, %s)", __FILE__, __LINE__, strerror(errno));
+                return;
+            }
+            *matches = p;
             (*matches)[*match_count-1] = strdup(commands[i].name);
         }
     }
@@ -74,6 +80,7 @@ get_model_completion(const char *hint, char ***matches, unsigned int *match_coun
     int i;
     uint32_t idx = 0;
     const struct lys_module *module;
+    void *p;
 
     *match_count = 0;
     *matches = NULL;
@@ -81,14 +88,24 @@ get_model_completion(const char *hint, char ***matches, unsigned int *match_coun
     while ((module = ly_ctx_get_module_iter(ctx, &idx))) {
         if (!strncmp(hint, module->name, strlen(hint))) {
             ++(*match_count);
-            *matches = realloc(*matches, *match_count * sizeof **matches);
+            p = realloc(*matches, *match_count * sizeof **matches);
+            if (!p) {
+                fprintf(stderr, "Memory allocation failed (%s:%d, %s)", __FILE__, __LINE__, strerror(errno));
+                return;
+            }
+            *matches = p;
             (*matches)[*match_count-1] = strdup(module->name);
         }
 
         for (i = 0; i < module->inc_size; ++i) {
             if (!strncmp(hint, module->inc[i].submodule->name, strlen(hint))) {
                 ++(*match_count);
-                *matches = realloc(*matches, *match_count * sizeof **matches);
+                p = realloc(*matches, *match_count * sizeof **matches);
+                if (!p) {
+                    fprintf(stderr, "Memory allocation failed (%s:%d, %s)", __FILE__, __LINE__, strerror(errno));
+                    return;
+                }
+                *matches = p;
                 (*matches)[*match_count-1] = strdup(module->inc[i].submodule->name);
             }
         }
@@ -105,7 +122,7 @@ complete_cmd(const char *buf, const char *hint, linenoiseCompletions *lc)
         linenoisePathCompletion(buf, hint, lc);
     } else if ((!strncmp(buf, "searchpath ", 11) || !strncmp(buf, "data ", 5)
             || !strncmp(buf, "config ", 7) || !strncmp(buf, "filter ", 7)
-            || !strncmp(buf, "xpath ", 6)) && !last_is_opt(hint)) {
+            || !strncmp(buf, "xpath ", 6) || !strncmp(buf, "clear ", 6)) && !last_is_opt(hint)) {
         linenoisePathCompletion(buf, hint, lc);
     } else if ((!strncmp(buf, "print ", 6) || !strncmp(buf, "feature ", 8)) && !last_is_opt(hint)) {
         get_model_completion(hint, &matches, &match_count);

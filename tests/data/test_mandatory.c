@@ -17,8 +17,8 @@
 #include <setjmp.h>
 #include <cmocka.h>
 
-#include "../config.h"
-#include "../../src/libyang.h"
+#include "tests/config.h"
+#include "libyang.h"
 
 struct state {
     struct ly_ctx *ctx;
@@ -38,7 +38,7 @@ setup_f(void **state)
     }
 
     /* libyang context */
-    st->ctx = ly_ctx_new(NULL);
+    st->ctx = ly_ctx_new(NULL, 0);
     if (!st->ctx) {
         fprintf(stderr, "Failed to create context.\n");
         return -1;
@@ -112,7 +112,7 @@ test_mandatory(void **state)
     assert_ptr_equal(st->dt, NULL);
     assert_int_equal(ly_errno, LY_EVALID);
     assert_int_equal(ly_vecode, LYVE_MISSELEM);
-    assert_string_equal(ly_errpath(), "/");
+    assert_string_equal(ly_errpath(), "/mandatory:top");
 
     st->dt = lyd_parse_mem(st->ctx, few_llist1, LYD_XML, LYD_OPT_CONFIG);
     assert_ptr_equal(st->dt, NULL);
@@ -130,7 +130,7 @@ test_mandatory(void **state)
     assert_ptr_equal(st->dt, NULL);
     assert_int_equal(ly_errno, LY_EVALID);
     assert_int_equal(ly_vecode, LYVE_MISSELEM);
-    assert_string_equal(ly_errpath(), "/mandatory:top");
+    assert_string_equal(ly_errpath(), "/mandatory:top/cont1/cont2/cont3");
 
     st->dt = lyd_parse_mem(st->ctx, miss_choice2, LYD_XML, LYD_OPT_CONFIG);
     assert_ptr_equal(st->dt, NULL);

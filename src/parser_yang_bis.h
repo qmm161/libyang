@@ -137,7 +137,14 @@ extern int yydebug;
     SYSTEM_KEYWORD = 347,
     TRUE_KEYWORD = 348,
     UNBOUNDED_KEYWORD = 349,
-    USER_KEYWORD = 350
+    USER_KEYWORD = 350,
+    ACTION_KEYWORD = 351,
+    MODIFIER_KEYWORD = 352,
+    ANYDATA_KEYWORD = 353,
+    NODE = 354,
+    NODE_PRINT = 355,
+    EXTENSION_INSTANCE = 356,
+    SUBMODULE_EXT_KEYWORD = 357
   };
 #endif
 
@@ -151,22 +158,34 @@ union YYSTYPE
   int32_t i;
   uint32_t uint;
   char *str;
+  char **p_str;
   void *v;
-  struct lys_module *inc;
+  char ch;
   struct yang_type *type;
+  struct lys_deviation *dev;
+  struct lys_deviate *deviate;
   union {
     uint32_t index;
     struct lys_node_container *container;
-    struct lys_node_anyxml *anyxml;
-    struct type_choice choice;
+    struct lys_node_anydata *anydata;
     struct type_node node;
     struct lys_node_case *cs;
     struct lys_node_grp *grouping;
-    struct type_uses uses;
     struct lys_refine *refine;
     struct lys_node_notif *notif;
-    struct type_deviation *deviation;
+    struct lys_node_uses *uses;
+    struct lys_node_inout *inout;
+    struct lys_node_augment *augment;
   } nodes;
+  enum yytokentype token;
+  struct {
+    void *actual;
+    enum yytokentype token;
+  } backup_token;
+  struct {
+    struct lys_revision **revision;
+    int index;
+  } revisions;
 
 
 };
@@ -192,6 +211,6 @@ struct YYLTYPE
 
 
 
-int yyparse (void *scanner, struct lys_module *module, struct lys_submodule *submodule, struct unres_schema *unres, struct lys_array_size *size_arrays, int read_all);
+int yyparse (void *scanner, struct yang_parameter *param);
 
 #endif /* !YY_YY_PARSER_YANG_BIS_H_INCLUDED  */

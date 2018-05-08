@@ -30,7 +30,7 @@ int main(int argc, char *argv[])
 	const struct lys_module *mod;
 
 	/* libyang context */
-        ctx = ly_ctx_new(NULL);
+        ctx = ly_ctx_new(NULL, 0);
         if (!ctx) {
                 fprintf(stderr, "Failed to create context.\n");
                 return 1;
@@ -57,12 +57,12 @@ int main(int argc, char *argv[])
 		} else {
 			lyd_insert_after(data->prev, next);
 		}
-		if (lyd_validate(&data, 0)) {
+		if (lyd_validate(&data, LYD_OPT_CONFIG, NULL)) {
 			goto cleanup;
 		}
 		//lyd_print_fd(fd, data, LYD_XML);
 	}
-	lyd_print_fd(fd, data, LYD_XML_FORMAT, LYP_WITHSIBLINGS);
+	lyd_print_fd(fd, data, LYD_XML, LYP_WITHSIBLINGS | LYP_FORMAT);
 	close(fd);
 
 cleanup:

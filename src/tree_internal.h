@@ -16,27 +16,13 @@
 #ifndef LY_TREE_INTERNAL_H_
 #define LY_TREE_INTERNAL_H_
 
+#include "libyang.h"
 #include "tree_schema.h"
 #include "tree_data.h"
 #include "resolve.h"
 
 /* this is used to distinguish lyxml_elem * from a YANG temporary parsing structure, the first byte is compared */
 #define LY_YANG_STRUCTURE_FLAG 0x80
-
-#define LY_INTERNAL_MODULE_COUNT 3
-
-/**
- * @brief Internal list of internal modules that are a part
- *        of every context and must never be freed. Structure
- *        instance defined in "tree.c".
- */
-struct internal_modules {
-    const struct {
-        const char *name;
-        const char *revision;
-    } modules[LY_INTERNAL_MODULE_COUNT];
-    const uint8_t count;
-};
 
 /**
  * @brief YANG namespace
@@ -59,13 +45,14 @@ struct internal_modules {
 #define LY_NSNACM "urn:ietf:params:xml:ns:yang:ietf-netconf-acm"
 
 /**
+ * @brief internal parser flag for actions and inline notifications
+ */
+#define LYD_OPT_ACT_NOTIF 0x100
+
+/**
  * @brief Internal list of built-in types
  */
-struct ly_types {
-    LY_DATA_TYPE type;
-    struct lys_tpdf *def;
-};
-extern struct ly_types ly_types[LY_DATA_TYPE_COUNT];
+extern struct lys_tpdf *ly_types[LY_DATA_TYPE_COUNT];
 
 /**
  * @brief Internal structure for data node sorting.
@@ -99,8 +86,8 @@ struct lyd_node_pos {
  * @param[in] unres list of unresolved items
  * @return Created submodule structure or NULL in case of error.
  */
-struct lys_submodule *lys_submodule_parse(struct lys_module *module, const char *data, LYS_INFORMAT format,
-                                          struct unres_schema *unres);
+struct lys_submodule *lys_sub_parse_mem(struct lys_module *module, const char *data, LYS_INFORMAT format,
+                                        struct unres_schema *unres);
 
 /**
  * @brief Create submodule structure by reading data from file descriptor.
@@ -114,8 +101,7 @@ struct lys_submodule *lys_submodule_parse(struct lys_module *module, const char 
  * @param[in] unres list of unresolved items
  * @return Created submodule structure or NULL in case of error.
  */
-struct lys_submodule *lys_submodule_read(struct lys_module *module, int fd, LYS_INFORMAT format,
-                                         struct unres_schema *unres);
+struct lys_submodule *lys_sub_parse_fd(struct lys_module *module, int fd, LYS_INFORMAT format, struct unres_schema *unres);
 
 /**
  * @brief Free the submodule structure
@@ -172,19 +158,70 @@ struct lys_node_grp *lys_find_grouping_up(const char *name, struct lys_node *sta
 int lys_check_id(struct lys_node *node, struct lys_node *parent, struct lys_module *module);
 
 /**
+ * @brief Check all XPath expressions of a node (when and must), set LYS_XPATH_DEP flag if required.
+ *
+ * @param[in] node Node to examine.
+ * @param[in] check_place Check where the node is placed to get know if the check is supposed to be performed
+ * @return EXIT_SUCCESS on success, EXIT_FAILURE on forward reference, -1 on error.
+ */
+int lys_check_xpath(struct lys_node *node, int check_place);
+
+/**
+ * @brief Get know if the node contains must or when with XPath expression
+ *
+ * @param[in] node Node to examine.
+ * @return 1 if contains, 0 otherwise
+ */
+int lys_has_xpath(const struct lys_node *node);
+
+/**
  * @brief Create a copy of the specified schema tree \p node
  *
  * @param[in] module Target module for the duplicated node.
  * @param[in] parent Schema tree node where the node is being connected, NULL in case of top level \p node.
  * @param[in] node Schema tree node to be duplicated.
- * @param[in] flags Config flag to be inherited in case the origin node does not specify config flag
- * @param[in] nacm NACM flags to be inherited from the parent
  * @param[in] unres list of unresolved items
  * @param[in] shallow Whether to copy children and connect to parent/module too.
  * @return Created copy of the provided schema \p node.
  */
 struct lys_node *lys_node_dup(struct lys_module *module, struct lys_node *parent, const struct lys_node *node,
-                              uint8_t flags, uint8_t nacm, struct unres_schema *unres, int shallow);
+                              struct unres_schema *unres, int shallow);
+
+/**
+ * @brief duplicate the list of extension instances.
+ *
+ * @param[in] ctx Context to store errors in.
+ * @param[in] mod Module where we are
+ * @param[in] orig list of the extension instances to duplicate, the size of the array must correspond with \p size
+ * @param[in] size number of items in \p old array to duplicate
+ * @param[in] parent Parent structure of the new extension instances list
+ * @param[in] parent_type Type of the provide \p parent *
+ * @param[in,out] new Address where to store the created list of duplicated extension instances
+ * @param[in] shallow Whether to copy children and connect to parent/module too.
+ * @param[in] unres list of unresolved items
+ *
+ */
+int lys_ext_dup(struct ly_ctx *ctx, struct lys_module *mod, struct lys_ext_instance **orig, uint8_t size, void *parent,
+                LYEXT_PAR parent_type, struct lys_ext_instance ***new, int shallow, struct unres_schema *unres);
+
+/**
+ * @brief Iterate over the specified type of the extension instances
+ *
+ * @param[in] ext Array of extensions to explore
+ * @param[in] ext_size Size of the provided \p ext array
+ * @param[in] start Index in the \p ext array where to start searching (first call with 0, the consequent calls with
+ *            the returned index increased by 1, unless the returned index is -1)
+ * @param[in] substmt Type of the extension (its belongins to the specific substatement) to iterate, use
+ *            #LYEXT_SUBSTMT_ALL to go through all the extensions in the array
+ * @result index in the ext, -1 if not present
+ */
+int lys_ext_iter(struct lys_ext_instance **ext, uint8_t ext_size, uint8_t start, LYEXT_SUBSTMT substmt);
+
+/**
+ * @brief free the array of the extension instances
+ */
+void lys_extension_instances_free(struct ly_ctx *ctx, struct lys_ext_instance **e, unsigned int size,
+                                  void (*private_destructor)(const struct lys_node *node, void *priv));
 
 /**
  * @brief Switch two same schema nodes. \p src must be a shallow copy
@@ -210,8 +247,10 @@ int lys_leaf_add_leafref_target(struct lys_node_leaf *leafref_target, struct lys
  *
  * @param[in] libyang context where the schema of the ondition is used.
  * @param[in] w When structure to free.
+ * @param[in] private_destructor Destructor for priv member in extension instances
  */
-void lys_when_free(struct ly_ctx *ctx, struct lys_when *w);
+void lys_when_free(struct ly_ctx *ctx, struct lys_when *w,
+                   void (*private_destructor)(const struct lys_node *node, void *priv));
 
 /**
  * @brief Free the schema tree restriction (must, ...) structure content
@@ -221,8 +260,10 @@ void lys_when_free(struct ly_ctx *ctx, struct lys_when *w);
  * the content of the structure, so after using this function, caller is supposed to
  * use free(restr). It is done to free the content of structures being allocated as
  * part of array, in that case the free() is used on the whole array.
+ * @param[in] private_destructor Destructor for priv member in extension instances
  */
-void lys_restr_free(struct ly_ctx *ctx, struct lys_restr *restr);
+void lys_restr_free(struct ly_ctx *ctx, struct lys_restr *restr,
+                    void (*private_destructor)(const struct lys_node *node, void *priv));
 
 /**
  * @brief Free the schema tree type structure content
@@ -232,8 +273,10 @@ void lys_restr_free(struct ly_ctx *ctx, struct lys_restr *restr);
  * the content of the structure, so after using this function, caller is supposed to
  * use free(type). It is done to free the content of structures being allocated as
  * part of array, in that case the free() is used on the whole array.
+ * @param[in] private_destructor Destructor for priv member in extension instances
  */
-void lys_type_free(struct ly_ctx *ctx, struct lys_type *type);
+void lys_type_free(struct ly_ctx *ctx, struct lys_type *type,
+                   void (*private_destructor)(const struct lys_node *node, void *priv));
 
 /**
  * @brief Unlink the schema node from the tree.
@@ -261,29 +304,41 @@ void lys_node_free(struct lys_node *node, void (*private_destructor)(const struc
  * @param[in] module Data model to free.
  * @param[in] private_destructor Optional destructor function for private objects assigned
  * to the nodes via lys_set_private(). If NULL, the private objects are not freed by libyang.
+ * @param[in] free_subs Whether to free included submodules.
  * @param[in] remove_from_ctx Whether to remove this model from context. Always use 1 except
  * when removing all the models (in ly_ctx_destroy()).
  */
-void lys_free(struct lys_module *module, void (*private_destructor)(const struct lys_node *node, void *priv), int remove_from_ctx);
+void lys_free(struct lys_module *module, void (*private_destructor)(const struct lys_node *node, void *priv),
+              int free_subs, int remove_from_ctx);
 
 /**
- * @brief Check presence of all the mandatory elements in the given data tree subtree. Logs directly.
+ * @brief Create a data container knowing it's schema node.
  *
- * Besides the mandatory statements, also min-elements and max-elements constraints in
- * lists and leaf-list are checked.
- *
- * If \p schema is NULL, iterate over and check \p data schema children. If \p schema is set, it is iterated over
- * its siblings.
- *
- * @param[in] data Root node for the searching subtree. Expecting that all child instances
- * mandatory nodes were already checked. Note that the \p start node itself is not checked since it must be present.
- * @param[in] schema To check mandatory elements in empty data tree (\p data is NULL), we need
- * the first schema node in a schema to be checked.
- * @param[in] status Include status (read-only) nodes.
- * @param[in] rpc_output Expect RPC output nodes instead RPC input ones.
- * @return EXIT_SUCCESS on success, EXIT_FAILURE on failure.
+ * @param[in] parent Data parent of the new node.
+ * @param[in] schema Schema node of the new node.
+ * @param[in] dflt Set dflt flag in the created data nodes
+ * @return New node, NULL on error.
  */
-int ly_check_mandatory(const struct lyd_node *data, const struct lys_node *schema, int status, int rpc_output);
+struct lyd_node *_lyd_new(struct lyd_node *parent, const struct lys_node *schema, int dflt);
+
+/**
+ * @brief Create a dummy node for XPath evaluation. After done using, it should be removed.
+ *
+ * The function must be used very carefully:
+ * - there must not be a list node to create
+ *
+ * @param[in] data Any data node of the tree where the dummy node will be created
+ * @param[in] parent To optimize searching in data tree (and to avoid issues with lists), caller can specify a
+ *                   parent node that exists in the data tree.
+ * @param[in] schema Schema node of the dummy node to create, must be of nodetype that
+ * appears also in data tree.
+ * @param[in] value Optional value to be set in the dummy node
+ * @param[in] dflt Set dflt flag in the created data nodes
+ *
+ * @return The first created node needed for the dummy node in the given tree.
+ */
+struct lyd_node *lyd_new_dummy(struct lyd_node *data, struct lyd_node *parent, const struct lys_node *schema,
+                               const char *value, int dflt);
 
 /**
  * @brief Find the parent node of an attribute.
@@ -296,19 +351,28 @@ int ly_check_mandatory(const struct lyd_node *data, const struct lys_node *schem
 const struct lyd_node *lyd_attr_parent(const struct lyd_node *root, struct lyd_attr *attr);
 
 /**
- * @brief Find an import from \p module with matching \p prefix, \p name, or both,
- * \p module itself is also compared.
+ * @brief Internal version of lyd_unlink().
  *
- * @param[in] module Module with imports.
- * @param[in] prefix Module prefix to search for.
- * @param[in] pref_len Module \p prefix length. If 0, the whole prefix is used, if not NULL.
- * @param[in] name Module name to search for.
- * @param[in] name_len Module \p name length. If 0, the whole name is used, if not NULL.
+ * @param[in] node Node to unlink.
+ * @param[in] permanent Whether the node is premanently unlinked or will be linked back.
  *
- * @return Matching module, NULL if not found.
+ * @return EXIT_SUCCESS on success, EXIT_FAILURE on error.
  */
-const struct lys_module *lys_get_import_module(const struct lys_module *module, const char *prefix, int pref_len,
-                                               const char *name, int name_len);
+int lyd_unlink_internal(struct lyd_node *node, int permanent);
+
+/**
+ * @brief Internal version of lyd_insert() and lyd_insert_sibling().
+ *
+ * @param[in] invalidate Whether to invalidate any nodes. Set 0 only if linking back some temporarily internally unlinked nodes.
+ */
+int lyd_insert_common(struct lyd_node *parent, struct lyd_node **sibling, struct lyd_node *node, int invalidate);
+
+/**
+ * @brief Internal version of lyd_insert_before() and lyd_insert_after().
+ *
+ * @param[in] invalidate Whether to invalidate any nodes. Set 0 only if linking back some temporarily internally unlinked nodes.
+ */
+int lyd_insert_nextto(struct lyd_node *sibling, struct lyd_node *node, int before, int invalidate);
 
 /**
  * @brief Find a specific sibling. Does not log.
@@ -331,19 +395,19 @@ int lys_get_sibling(const struct lys_node *siblings, const char *mod_name, int m
                     int nam_len, LYS_NODE type, const struct lys_node **ret);
 
 /**
- * @brief Find a specific sibling that can appear in the data. Does not log.
+ * @brief Find a specific node that can only appear in the data. Does not log.
  *
- * @param[in] mod Main module with the node.
- * @param[in] siblings Siblings to consider. They are first adjusted to
- *                     point to the first sibling.
+ * @param[in] mod Main module with the node. Must be set if \p parent == NULL (top-level node).
+ * @param[in] parent Parent of the node. Must be set if \p mod == NULL (nested node).
  * @param[in] name Node name.
+ * @param[in] nam_len Node \p name length.
  * @param[in] type ORed desired type of the node. 0 means any (data node) type.
  * @param[out] ret Pointer to the node of the desired type. Can be NULL.
  *
  * @return EXIT_SUCCESS on success, EXIT_FAILURE on fail.
  */
-int lys_get_data_sibling(const struct lys_module *mod, const struct lys_node *siblings, const char *name, LYS_NODE type,
-                         const struct lys_node **ret);
+int lys_getnext_data(const struct lys_module *mod, const struct lys_node *parent, const char *name, int nam_len,
+                     LYS_NODE type, const struct lys_node **ret);
 
 /**
  * @brief Compare 2 list or leaf-list data nodes if they are the same from the YANG point of view. Logs directly.
@@ -354,57 +418,90 @@ int lys_get_data_sibling(const struct lys_module *mod, const struct lys_node *si
  *
  * @param[in] first First data node to compare.
  * @param[in] second Second node to compare.
- * @param[in] printval Flag for printing validation errors, useful for internal (non-validation) use of this function
+ * @param[in] action Option to specify what will be checked:
+ *            -1 - compare keys and all uniques
+ *             0 - compare only keys
+ *             n - compare n-th unique
+ * @param[in] withdefaults Whether only different dflt flags cause 2 nodes not to be equal.
+ * @param[in] log Flag for printing validation errors, useful for internal (non-validation) use of this function
  * @return 1 if both the nodes are the same from the YANG point of view,
  *         0 if they differ,
  *         -1 on error.
  */
-int lyd_list_equal(struct lyd_node *first, struct lyd_node *second, int printval);
+int lyd_list_equal(struct lyd_node *first, struct lyd_node *second, int action, int withdefaults, int log);
+
+const char *lyd_get_unique_default(const char* unique_expr, struct lyd_node *list);
 
 /**
- * @brief Check for (validate) top-level mandatory nodes of a data tree.
+ * @brief Check for (validate) mandatory nodes of a data tree. Checks recursively whole data tree. Requires all when
+ * statement to be solved.
  *
- * @param[in] data Data tree to validate.
- * @param[in] ctx libyang context.
- * @param[in] rpc RPC node should be set in case options & LYD_OPT_RPCREPLY and data == NULL.
+ * @param[in] root Data tree to validate.
+ * @param[in] ctx libyang context (for the case when the data tree is empty - i.e. root == NULL).
  * @param[in] options Standard @ref parseroptions.
  * @return EXIT_SUCCESS or EXIT_FAILURE.
  */
-int lyd_check_topmandatory(struct lyd_node *data, struct ly_ctx *ctx, int options);
+int lyd_check_mandatory_tree(struct lyd_node *root, struct ly_ctx *ctx, int options);
+
+/**
+ * @brief Check if the provided node is inside a grouping.
+ *
+ * @param[in] node Schema node to check.
+ * @return 0 as false, 1 as true
+ */
+int lys_ingrouping(const struct lys_node *node);
 
 /**
  * @brief Add default values, \p resolve unres, and finally
  * remove any redundant default values based on \p options.
  *
- * @param[in] root Data tree root. In case of #LYD_WD_TRIM the data tree can be modified so the root can be changed or
- *            removed. In other modes and with empty data tree, new default nodes can be created so the root pointer
+ * @param[in] root Data tree root. With empty data tree, new default nodes can be created so the root pointer
  *            will contain/return the newly created data tree.
- * @param[in] options Options for the inserting data to the target data tree options, see @ref parseroptions. The
- *            LYD_WD_* options are used to select functionality:
- * - #LYD_WD_TRIM - remove all nodes that have value equal to their default value
- * - #LYD_WD_ALL - add default nodes
- * - #LYD_WD_ALL_TAG - add default nodes and set ::lyd_node#dflt in all nodes having their default value
- * - #LYD_WD_IMPL_TAG - add default nodes, but set ::lyd_node#dflt only in the added nodes
- * @note The *_TAG modes require to have ietf-netconf-with-defaults module in the context of the data tree in time of
- * printing - all the flagged nodes are printed with the 'default' attribute with 'true' value.
- * @param[in] ctx Optional parameter. If provided, default nodes from all modules in the context will be added (so it
- *            has no effect for #LYD_WD_TRIM). If NULL, only the modules explicitly mentioned in data tree are
- *            taken into account.
+ * @param[in] options Options for the inserting data to the target data tree options, see @ref parseroptions.
+ * @param[in] ctx Optional parameter. If provided, default nodes from all modules in the context will be added.
+ *            If NULL, only the modules explicitly mentioned in data tree are taken into account.
+ * @param[in] data_tree Additional data tree to be traversed when evaluating when or must expressions in \p root
+ *            tree.
+ * @param[in] act_notif Action/notification itself in case \p root is actually an action/notification.
  * @param[in] unres Valid unres structure, on function successful exit they are all resolved.
  * @return 0 on success, nonzero on failure.
  */
-int lyd_defaults_add_unres(struct lyd_node **node, int options, struct ly_ctx *ctx, struct unres_data *unres);
+int lyd_defaults_add_unres(struct lyd_node **root, int options, struct ly_ctx *ctx, const struct lyd_node *data_tree,
+                           struct lyd_node *act_notif, struct unres_data *unres);
 
-void lys_deviation_add_ext_imports(struct lys_module *dev_target_module, struct lys_module *dev_module);
+void lys_enable_deviations(struct lys_module *module);
 
-void lys_switch_deviations(struct lys_module *module);
+void lys_disable_deviations(struct lys_module *module);
 
 void lys_sub_module_remove_devs_augs(struct lys_module *module);
 
-int lys_module_set_implement(struct lys_module *module);
+void lys_sub_module_apply_devs_augs(struct lys_module *module);
 
-int lys_sub_module_set_dev_aug_target_implement(struct lys_module *module);
+int apply_aug(struct lys_node_augment *augment, struct unres_schema *unres);
 
 void lys_submodule_module_data_free(struct lys_submodule *submodule);
+
+int lys_copy_union_leafrefs(struct lys_module *mod, struct lys_node *parent, struct lys_type *type,
+                            struct lys_type *prev_new, struct unres_schema *unres);
+
+const struct lys_module *lys_parse_fd_(struct ly_ctx *ctx, int fd, LYS_INFORMAT format, const char *revision, int implement);
+
+const struct lys_module *lys_parse_mem_(struct ly_ctx *ctx, const char *data, LYS_INFORMAT format, const char *revision,
+                                        int internal, int implement);
+
+/**
+ * @brief Get know if the \p leaf is a key of the \p list
+ * @return 0 for false, position of the key otherwise
+ */
+int lys_is_key(struct lys_node_list *list, struct lys_node_leaf *leaf);
+
+/**
+ * @brief Get next augment from \p mod augmenting \p aug_target
+ */
+struct lys_node_augment *lys_getnext_target_aug(struct lys_node_augment *last, const struct lys_module *mod,
+                                                const struct lys_node *aug_target);
+
+LY_STMT lys_snode2stmt(LYS_NODE nodetype);
+struct lys_node ** lys_child(const struct lys_node *node, LYS_NODE nodetype);
 
 #endif /* LY_TREE_INTERNAL_H_ */
